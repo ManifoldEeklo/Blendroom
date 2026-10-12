@@ -307,6 +307,22 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
 #fxAdd{max-width:150px}
 .fxpanel .seg{display:flex;flex-wrap:wrap}
 .fxpanel input[type=range]{flex:1;accent-color:var(--gold)}
+
+/* device adaptations */
+.touchbar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.touchbar .btn{flex:1;justify-content:center;min-height:44px;font-size:15px}
+.is-touch .btn{min-height:40px}
+.is-touch .btn.mini{min-height:34px;padding:6px 12px}
+.is-touch .seg button{min-height:38px;padding:8px 14px}
+.is-touch .ehint, .is-touch kbd{display:none}
+.is-touch .tab{min-height:42px}
+.dev-phone .vu{display:none}
+.dev-phone .touchbar{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.dev-phone .touchbar .btn{font-size:13px;padding:6px 2px;min-width:0;white-space:nowrap}
+.dev-phone body, body.dev-phone{padding-right:0}
+.dev-phone .player{right:6px}
+.dev-phone #mixcv{height:46vh;min-height:260px}
+.dev-tablet #mixcv{height:calc(100vh - 380px)}
 </style>
 </head>
 <body>
@@ -329,7 +345,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
     <button role="tab" class="tab" data-tab="mix" aria-selected="false"><span class="tn">◧</span>Mix</button>
     <button role="tab" class="tab" data-tab="ai" aria-selected="false"><span class="tn">✦</span>AI</button>
   </nav>
-  <div class="appbar-r"><span id="mixMeta"></span><button class="btn primary" id="download">Download MP3</button></div>
+  <div class="appbar-r"><span id="mixMeta"></span><button class="btn ghost" id="notifyBtn" hidden title="Get a notification when a long mix or MP3 is ready">🔔 Notifications</button><button class="btn primary" id="download">Download MP3</button></div>
 </header>
 
 <main class="stage">
@@ -415,6 +431,12 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
         <button class="btn" id="syncAll" title="Snap everything back onto the beat grid">Sync all to beat</button>
         <button class="btn" id="fixVocals" title="Stop two vocals playing at once">Check vocal clashes</button>
         <button class="btn" id="autoLevel" title="Match the loudness of every section">Auto-level</button>
+      </div>
+      <div class="touchbar" id="touchBar" hidden aria-label="Touch controls">
+        <button class="btn" data-tk="n" title="Start the next song's section here">⤓ Next here</button>
+        <button class="btn" data-tk="i" title="Put an impact here">✸ Impact</button>
+        <button class="btn" data-tk="s" title="Start of the selected song's section">[ Start</button>
+        <button class="btn" data-tk="e" title="End of the selected song's section">End ]</button>
       </div>
       <div class="mixgrid">
         <div class="timeline"><canvas id="mixcv" aria-label="Mix timeline. Drag blocks to move them, drag edges to resize, click a transition label to edit it, click anywhere to set the play position. While listening, press N to start the next song's section at that moment."></canvas></div>
@@ -520,7 +542,7 @@ async function getBuffer(t) {
   const b = await ac().decodeAudioData(data);
   bufCache.set(key, b);
   const bytes = () => { let n = 0; bufCache.forEach(x => { n += x.length * x.numberOfChannels * 4; }); return n; };
-  while (bufCache.size > 1 && bytes() > 700e6) bufCache.delete(bufCache.keys().next().value);
+  while (bufCache.size > 1 && bytes() > S.device.bufBudget) bufCache.delete(bufCache.keys().next().value);
   return b;
 }
 
@@ -1050,7 +1072,7 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
       done++; if (onProg) onProg(0.92 * done / jobs.length);
     }
   };
-  const nW = clamp(navigator.hardwareConcurrency || 4, 2, 6);
+  const nW = S.device.workers;
   await Promise.all(Array.from({ length: Math.min(nW, Math.max(1, jobs.length)) }, worker));
   if (cancelled || (isCancelled && isCancelled())) return null;
   compressBuf(out);
@@ -1235,7 +1257,7 @@ async function getSlice(it) {
   { const bt = 60 / effBpm(t), rp = refinePhase(out, pre + ((t.downbeat - it.s) % bt + bt) % bt, bt); val.phase = rp.ph; val.k = rp.k; }
   if (t.vocalOnly) { setStatus('Isolating the vocals of ' + t.name + '…'); await isolateVocals(out); setStatus(''); }
   sliceCache.set(ck, val);
-  { let n = 0; sliceCache.forEach(v => { n += v.buf.length * 8; }); for (const k of sliceCache.keys()) { if (n <= 400e6 || sliceCache.size <= 1) break; n -= sliceCache.get(k).buf.length * 8; sliceCache.delete(k); } }
+  { let n = 0; sliceCache.forEach(v => { n += v.buf.length * 8; }); for (const k of sliceCache.keys()) { if (n <= S.device.sliceBudget || sliceCache.size <= 1) break; n -= sliceCache.get(k).buf.length * 8; sliceCache.delete(k); } }
   return val;
 }
 function normalize(buf) {
@@ -1722,7 +1744,7 @@ function bindWave(cv) {
     const r = cv.getBoundingClientRect(), x = e.clientX - r.left, time = timeAt(e), bl = barLen(t), bars = clampBars(t);
     const xs = t.secStart / t.duration * r.width, xe = (t.secStart + bars * bl) / t.duration * r.width;
     let mode = 'cue';
-    if (Math.abs(x - xs) < 12) mode = 'start'; else if (Math.abs(x - xe) < 12) mode = 'end';
+    if (Math.abs(x - xs) < 12 * S.device.hit) mode = 'start'; else if (Math.abs(x - xe) < 12 * S.device.hit) mode = 'end';
     else if (x > xs && x < xe) mode = 'move';
     drag = { mode, t0: time, x0: e.clientX, s0: t.secStart, bars0: bars, moved: false };
     cv.setPointerCapture(e.pointerId); selectTarget(t.id);
@@ -1919,6 +1941,7 @@ async function aiBuildMix() {
   S.dockSel = null; S.mixPos = 0; markDirty(); renderList();
   $('#aiUndo').hidden = false;
   setTab('mix');
+  notifyDone('Your AI mix is ready: ' + fmt(tot) + '.');
   setDesignStatus('Built a ' + fmt(tot) + ' mix from ' + use.length + (use.length === 1 ? ' song' : ' songs') +
     (nRep ? ', with ' + nRep + (nRep === 1 ? ' reprise' : ' reprises') + ' of the strongest vocal hooks' : '') +
     (use.length < origins.length ? '. ' + (origins.length - use.length) + ' left out to fit the length' : '') +
@@ -2035,6 +2058,7 @@ async function buildMix(opts) {
     $('#mixResult').hidden = false; $('#dirty').hidden = true;
     renderTransList(); drawMix(0); updateMixTime(0);
     setStatus('');
+    notifyDone('Your ' + fmt(plan.total) + ' mix is ready.');
     const dl = await getDownloads(); $('#download').hidden = !dl;
     if (!dl) setStatus('');
   } catch (e) { console.error(e); S.pendingPlay = null; setStatus('The mix could not be built: ' + (e && e.message ? e.message : e)); }
@@ -2059,7 +2083,7 @@ async function playMixFrom(p) {
     const plan = computePlan(); if (!plan.items.length) return;
     S.busy = true;
     try {
-      p = clamp(p, 0, Math.max(0, plan.total - 0.05)); const w1 = Math.min(plan.total, p + 30);
+      p = clamp(p, 0, Math.max(0, plan.total - 0.05)); const w1 = Math.min(plan.total, p + S.device.quickSec);
       setBusy('Starting playback', null);
       const slices = [];
       for (let k = 0; k < plan.items.length; k++) { const it = plan.items[k]; if (it.start < w1 && it.start + it.len > p - 4 * plan.beat) slices[k] = await getSlice(it); }
@@ -2135,7 +2159,7 @@ async function exportMix() {
         let data, name;
         if (window.lamejs && lamejs.Mp3Encoder) { data = await encodeMp3(S.mix.buf, p => setBusy('Encoding MP3', p)); clearBusy(); name = 'blendroom-mix.mp3'; S.mix.mp3 = new Blob([data], { type: 'audio/mpeg' }); }
         else { data = encodeWav(S.mix.buf); name = 'blendroom-mix.wav'; S.mix.mp3 = new Blob([data], { type: 'audio/wav' }); }
-        S.mix.mp3name = name;
+        S.mix.mp3name = name; notifyDone('Your MP3 is ready. Open Blendroom to save it.');
       }
       await pwaSave(S.mix.mp3name, S.mix.mp3);
       setStatus('Saved ' + S.mix.mp3name + '.');
@@ -2360,7 +2384,7 @@ function bindSecEdit(t) {
   cv.addEventListener('pointerdown', e => {
     const r = cv.getBoundingClientRect(), x = e.clientX - r.left, bl = barLen(t), a = t.secStart, b = a + clampBars(t) * bl;
     const xa = a / t.duration * r.width, xb = b / t.duration * r.width;
-    const mode = Math.abs(x - xa) <= 10 ? 'start' : Math.abs(x - xb) <= 10 ? 'end' : (x > xa && x < xb ? 'move' : null);
+    const mode = Math.abs(x - xa) <= 10 * S.device.hit ? 'start' : Math.abs(x - xb) <= 10 * S.device.hit ? 'end' : (x > xa && x < xb ? 'move' : null);
     if (!mode) return;
     if (P.kind === 'track:' + t.id) stopPlay();
     drag = { mode, t0: timeAt(e), a, bars: clampBars(t), end: b }; cv.setPointerCapture(e.pointerId);
@@ -2440,8 +2464,8 @@ function edgeHit(e) {
   for (let i = plan.items.length - 1; i >= 0; i--) {
     const it = plan.items[i], xa = it.start / T * r.width, xb = (it.start + it.len) / T * r.width, ly = top + (i % 2) * (laneH + gap);
     if (y < ly + 14 || y > ly + laneH) continue;
-    if (i > 0 && Math.abs(x - xa) <= 7) return { it, i, side: 'L' };
-    if (Math.abs(x - xb) <= 7) return { it, i, side: 'R' };
+    if (i > 0 && Math.abs(x - xa) <= 7 * S.device.hit) return { it, i, side: 'L' };
+    if (Math.abs(x - xb) <= 7 * S.device.hit) return { it, i, side: 'R' };
   }
   return null;
 }
@@ -2463,7 +2487,7 @@ function mixHit(e) {
     const it = plan.items[i], xa = it.start / T * r.width, xb = (it.start + it.len) / T * r.width, ly = top + (i % 2) * (laneH + gap);
     if (x < xa || x > xb || y < ly || y > ly + laneH) continue;
     const gy = ly + laneH * (1 - ((it.t.gainDb || 0) + 12) / 24);
-    if (Math.abs(y - gy) <= 8) return { t: it.t, ly, laneH };
+    if (Math.abs(y - gy) <= 8 * S.device.hit) return { t: it.t, ly, laneH };
   }
   return null;
 }
@@ -2756,7 +2780,7 @@ function drawManWave(t, ph) {
 function bindManWave(cv) {
   const t = S.tracks.find(x => x.id === cv.dataset.id); if (!t) return;
   const timeAt = e => { const rc = cv.getBoundingClientRect(); return clamp((e.clientX - rc.left) / rc.width, 0, 1) * t.duration; };
-  const nearMk = e => { const r = manRow(t), rc = cv.getBoundingClientRect(), x = e.clientX - rc.left, ds = Math.abs(x - r.start / t.duration * rc.width), de = Math.abs(x - r.end / t.duration * rc.width); return Math.min(ds, de) <= 12 ? (ds <= de ? 'start' : 'end') : null; };
+  const nearMk = e => { const r = manRow(t), rc = cv.getBoundingClientRect(), x = e.clientX - rc.left, ds = Math.abs(x - r.start / t.duration * rc.width), de = Math.abs(x - r.end / t.duration * rc.width); return Math.min(ds, de) <= 12 * S.device.hit ? (ds <= de ? 'start' : 'end') : null; };
   cv.addEventListener('pointerdown', e => {
     const mk = nearMk(e);
     if (mk) { cv._drag = mk; cv.setPointerCapture(e.pointerId); return; }
@@ -3054,6 +3078,37 @@ $('#uploadList').addEventListener('click', e => {
 document.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('.tab'); if (b) setTab(b.dataset.tab); });
 document.addEventListener('click', e => { const g = e.target.closest('[data-goto]'); if (g) setTab(g.dataset.goto); });
 setTab('upload');
+
+/* ---------- device detection: phone / tablet / computer ---------- */
+function detectDevice() {
+  const mm = q => window.matchMedia ? window.matchMedia(q).matches : false;
+  const ua = navigator.userAgent || '', ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const touch = mm('(pointer: coarse)') || navigator.maxTouchPoints > 0 && !mm('(pointer: fine)');
+  const short = Math.min(screen.width, screen.height);
+  const kind = touch ? (short < 600 ? 'phone' : 'tablet') : 'desktop';
+  const standalone = mm('(display-mode: standalone)') || navigator.standalone === true;
+  const mem = navigator.deviceMemory || (kind === 'phone' ? 3 : kind === 'tablet' ? 4 : 8), cores = navigator.hardwareConcurrency || 4;
+  const low = kind === 'phone' || mem <= 4;
+  return {
+    kind, touch, ios, standalone, low,
+    bufBudget: kind === 'phone' ? 160e6 : kind === 'tablet' || mem <= 4 ? 320e6 : 700e6,
+    sliceBudget: kind === 'phone' ? 120e6 : kind === 'tablet' || mem <= 4 ? 220e6 : 400e6,
+    workers: kind === 'phone' ? 2 : kind === 'tablet' ? 3 : clamp(cores, 2, 6),
+    quickSec: kind === 'phone' ? 20 : 30,
+    hit: touch ? 2 : 1
+  };
+}
+S.device = detectDevice();
+function applyDevice() {
+  const d = S.device, cl = document.body.classList;
+  cl.toggle('dev-phone', d.kind === 'phone'); cl.toggle('dev-tablet', d.kind === 'tablet'); cl.toggle('dev-desktop', d.kind === 'desktop');
+  cl.toggle('is-touch', d.touch); cl.toggle('is-standalone', d.standalone);
+  const tb = $('#touchBar'); if (tb) tb.hidden = !d.touch;
+  const dl = $('#download'); if (dl && d.ios) dl.textContent = 'Save MP3';
+  if (d.kind === 'phone' && S.dragSnap === 'free') S.dragSnap = 'beat';
+}
+applyDevice();
+$('#touchBar').addEventListener('click', e => { const b = e.target.closest('[data-tk]'); if (!b) return; document.dispatchEvent(new KeyboardEvent('keydown', { key: b.dataset.tk, bubbles: true })); });
 syncControls();
 (function splash() {
   const el = $('#splash'), cv = $('#splashcv'), fill = $('#sfill'), pct = $('#spct'), bar = el && el.querySelector('.sbar'); if (!el || !cv) return;
@@ -3118,6 +3173,31 @@ syncControls();
 })();
 requestAnimationFrame(vuLoop);
 getDownloads().then(d => { if (!d) $('#download').hidden = true; });
+async function notifyDone(body) {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification('Blendroom', { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'blendroom' });
+  } catch (e) {}
+}
+function updateNotifyBtn() {
+  const b = $('#notifyBtn'); if (!b) return;
+  const ok = 'Notification' in window && 'serviceWorker' in navigator && location.protocol !== 'file:';
+  b.hidden = !ok; if (!ok) return;
+  const st = Notification.permission;
+  b.textContent = st === 'granted' ? '🔔 On' : st === 'denied' ? '🔕 Blocked' : '🔔 Notifications';
+  b.setAttribute('aria-pressed', String(st === 'granted'));
+}
+$('#notifyBtn').addEventListener('click', async () => {
+  if (Notification.permission === 'denied') { setStatus('Notifications are blocked. Turn them on in Settings \u2192 Notifications \u2192 Blendroom.'); return; }
+  if (Notification.permission === 'granted') { setStatus('Notifications are on. Manage them in Settings \u2192 Notifications \u2192 Blendroom.'); return; }
+  const r = await Notification.requestPermission(); updateNotifyBtn();
+  if (r === 'granted') {
+    setStatus('Notifications are on. Blendroom now also appears in Settings \u2192 Notifications.');
+    try { const reg = await navigator.serviceWorker.ready; await reg.showNotification('Blendroom', { body: 'Notifications are on. You will hear from me when a long mix is ready.', icon: 'icons/icon-192.png', tag: 'blendroom' }); } catch (e) {}
+  }
+});
+updateNotifyBtn();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 </script>
 </body>

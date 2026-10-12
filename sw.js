@@ -1,5 +1,5 @@
 /* Blendroom service worker: works offline after the first visit */
-const VERSION = 'blendroom-v1';
+const VERSION = 'blendroom-v3';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 const CDN = /(^|\.)fonts\.googleapis\.com$|(^|\.)fonts\.gstatic\.com$|(^|\.)cdnjs\.cloudflare\.com$/;
 
@@ -29,4 +29,13 @@ self.addEventListener('fetch', e => {
       const res = await fetch(req); if (res.ok || res.type === 'opaque') c.put(req, res.clone()); return res;
     }));
   }
+});
+
+// open (or focus) Blendroom when a notification is tapped
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if ('focus' in c) return c.focus();
+    return self.clients.openWindow('./');
+  }));
 });
