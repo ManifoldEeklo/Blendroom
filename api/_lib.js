@@ -3,9 +3,16 @@ const crypto = require('crypto');
 let client = null;
 function db() {
   if (client) return client;
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) throw Object.assign(new Error('No database connected. Add an Upstash Redis (KV) store to this Vercel project.'), { status: 500 });
+  // accept the default names and names with a custom prefix (e.g. STORAGE_KV_REST_API_URL)
+  const env = process.env, find = suf => { const k = Object.keys(env).find(n => n === suf || n.endsWith('_' + suf)); return k ? env[k] : ''; };
+  const url = find('KV_REST_API_URL') || find('UPSTASH_REDIS_REST_URL');
+  const token = find('KV_REST_API_TOKEN') || find('UPSTASH_REDIS_REST_TOKEN');
+  if (!url || !token) {
+    const hasTcp = Object.keys(env).some(n => /REDIS_URL$|KV_URL$/.test(n));
+    throw Object.assign(new Error(hasTcp
+      ? 'A database is connected, but not Upstash. Connect "Upstash for Redis" under Storage, then redeploy.'
+      : 'No database connected. Connect "Upstash for Redis" under Storage, then redeploy.'), { status: 500 });
+  }
   const { Redis } = require('@upstash/redis');
   client = new Redis({ url, token });
   return client;
