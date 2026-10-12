@@ -323,6 +323,16 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
 .dev-phone .player{right:6px}
 .dev-phone #mixcv{height:46vh;min-height:260px}
 .dev-tablet #mixcv{height:calc(100vh - 380px)}
+.ident{position:fixed;inset:0;z-index:45;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.86);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.ident-card{width:min(420px,100%);background:var(--panel);border:1px solid var(--gold);border-radius:22px;padding:26px 22px 22px;box-shadow:0 20px 60px rgba(0,0,0,.8)}
+.ident-ic{font-size:36px;line-height:1}
+.ident-card h2{font-size:26px;margin:10px 0 6px;color:var(--gold)}
+.ident-card p{color:var(--muted);font-size:14px;margin:0 0 14px}
+.ident-card label{display:block;font-size:13px;font-weight:700;color:var(--muted);margin:12px 0 6px}
+.ident-card input{width:100%;font:inherit;font-size:17px;color:var(--ink);background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.ident-card input:focus{outline:2px solid var(--gold);outline-offset:1px}
+.ident-err{min-height:20px;color:#FF8A8A!important;font-weight:700;margin:12px 0 4px!important}
+.ident-card .btn{width:100%;justify-content:center;margin-top:6px}
 </style>
 </head>
 <body>
@@ -336,6 +346,19 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
     <div id="spct">0%</div>
   </div>
 </div>
+<div id="ident" class="ident" role="dialog" aria-modal="true" aria-labelledby="identTitle" hidden>
+  <form class="ident-card" id="identForm" novalidate>
+    <div class="ident-ic" aria-hidden="true">👋</div>
+    <h2 id="identTitle">Identify yourself</h2>
+    <p>Enter your real first and last name. It is stored only on this device and shown to the Blendroom team with your notifications.</p>
+    <label for="idFirst">First name</label>
+    <input id="idFirst" autocomplete="given-name" autocapitalize="words" spellcheck="false" maxlength="30" required>
+    <label for="idLast">Last name</label>
+    <input id="idLast" autocomplete="family-name" autocapitalize="words" spellcheck="false" maxlength="40" required>
+    <p class="ident-err" id="identErr" role="alert"></p>
+    <button class="btn primary big" id="identGo" type="submit">Continue</button>
+  </form>
+</div>
 <header class="appbar">
   <div class="brand" aria-label="Blendroom"><span class="a">Blend</span><span class="b">room</span></div>
   <nav class="tabs" role="tablist" aria-label="Sections of the app">
@@ -345,7 +368,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
     <button role="tab" class="tab" data-tab="mix" aria-selected="false"><span class="tn">◧</span>Mix</button>
     <button role="tab" class="tab" data-tab="ai" aria-selected="false"><span class="tn">✦</span>AI</button>
   </nav>
-  <div class="appbar-r"><span id="mixMeta"></span><button class="btn ghost" id="notifyBtn" hidden title="Get a notification when a long mix or MP3 is ready">🔔 Notifications</button><button class="btn primary" id="download">Download MP3</button></div>
+  <div class="appbar-r"><span id="mixMeta"></span><button class="btn ghost" id="notifyBtn" hidden title="Notifications: tap again to rename this device">🔔 Notifications</button><button class="btn primary" id="download">Download MP3</button></div>
 </header>
 
 <main class="stage">
@@ -3173,6 +3196,51 @@ syncControls();
 })();
 requestAnimationFrame(vuLoop);
 getDownloads().then(d => { if (!d) $('#download').hidden = true; });
+function autoDeviceName() {
+  const ua = navigator.userAgent, touchMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) || touchMac ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows PC' : /Linux/.test(ua) ? 'Linux' : 'Device';
+  const app = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+  const br = /Edg\//.test(ua) ? 'Edge' : /CriOS|Chrome\//.test(ua) ? 'Chrome' : /FxiOS|Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return os + (app ? ' (app)' : br ? ' (' + br + ')' : '');
+}
+function deviceId() { try { let id = localStorage.getItem('br-device'); if (!id) { id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2); localStorage.setItem('br-device', id); } return id; } catch (e) { return ''; } }
+function myDeviceName() { try { return localStorage.getItem('br-user-name') || localStorage.getItem('br-device-name') || ''; } catch (e) { return ''; } }
+function askDeviceName() { if (myDeviceName()) return true; showIdentify(); return false; }
+const NAME_PARTICLES = new Set(['van', 'de', 'der', 'den', 'het', 'ten', 'ter', 'te', 'le', 'la', 'du', 'des', 'von', 'di', 'da', 'del', 'dos', 'du', 'op', "'t", 'in']);
+const FAKE_NAMES = new Set(['test', 'tester', 'testing', 'admin', 'user', 'username', 'anonymous', 'anon', 'unknown', 'nobody', 'none', 'nothing', 'xxx', 'xx', 'asdf', 'qwerty', 'azerty', 'fake', 'naam', 'name', 'voornaam', 'achternaam', 'blabla', 'bla', 'lol', 'haha', 'hihi', 'dj', 'me', 'ik', 'jij', 'you', 'mister', 'mr', 'mrs', 'doe', 'abc', 'iets', 'niemand', 'something', 'someone', 'guest', 'gast', 'blendroom']);
+function niceName(v, last) {
+  v = v.trim().replace(/\s+/g, ' ');
+  const words = v.split(' '), mixed = v !== v.toLowerCase() && v !== v.toUpperCase();
+  if (mixed) return v.charAt(0).toUpperCase() + v.slice(1);
+  return words.map((w, i) => last && i < words.length - 1 && NAME_PARTICLES.has(w.toLowerCase()) ? w.toLowerCase() : w.toLowerCase().replace(/(^|[-'])(\p{L})/gu, (m, a, c) => a + c.toUpperCase())).join(' ');
+}
+function nameProblem(first, last) {
+  const ok = /^\p{L}[\p{L}'\u2019 -]*\p{L}$/u;
+  for (const [v, what] of [[first, 'first name'], [last, 'last name']]) {
+    if (v.length < 2) return 'Please enter your ' + what + '.';
+    if (!ok.test(v)) return 'Your ' + what + ' can only contain letters, spaces, hyphens and apostrophes.';
+    if (/(\p{L})\1\1/iu.test(v)) return 'That ' + what + ' doesn\u2019t look like a real name.';
+    if (!/[aeiouy\u00e0-\u00ff]/i.test(v)) return 'That ' + what + ' doesn\u2019t look like a real name.';
+    if (FAKE_NAMES.has(v.toLowerCase())) return 'Please use your real ' + what + '.';
+  }
+  if (first.toLowerCase() === last.toLowerCase()) return 'Please enter your real first and last name.';
+  if (/^(john|jane) doe$/i.test(first + ' ' + last)) return 'Please use your real name.';
+  return '';
+}
+function showIdentify() {
+  const box = $('#ident'); if (!box || myDeviceName()) return;
+  box.hidden = false; setTimeout(() => { const f = $('#idFirst'); if (f && !$('#splash')) f.focus(); }, 50);
+}
+$('#identForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const first = niceName($('#idFirst').value, false), last = niceName($('#idLast').value, true), err = nameProblem(first, last);
+  $('#identErr').textContent = err; if (err) return;
+  try { localStorage.setItem('br-user-name', first + ' ' + last); localStorage.setItem('br-user-first', first); } catch (x) {}
+  $('#ident').hidden = true;
+  setStatus('Welcome, ' + first + '!');
+  ensurePush();
+});
+['#idFirst', '#idLast'].forEach(sel => $(sel).addEventListener('input', () => { $('#identErr').textContent = ''; }));
 function b64ToU8(b64) { const pad = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, c => c.charCodeAt(0)); }
 async function ensurePush() {
   try {
@@ -3184,7 +3252,7 @@ async function ensurePush() {
       const { key } = await r.json(); if (!key) return false;
       sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) });
     }
-    const r2 = await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub.toJSON() }) });
+    const r2 = await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub.toJSON(), device: { id: deviceId(), name: myDeviceName() || autoDeviceName(), auto: autoDeviceName() } }) });
     return r2.ok;
   } catch (e) { console.warn('push', e); return false; }
 }
@@ -3205,16 +3273,17 @@ function updateNotifyBtn() {
 }
 $('#notifyBtn').addEventListener('click', async () => {
   if (Notification.permission === 'denied') { setStatus('Notifications are blocked. Turn them on in Settings \u2192 Notifications \u2192 Blendroom.'); return; }
-  if (Notification.permission === 'granted') { setStatus('Notifications are on. Manage them in Settings \u2192 Notifications \u2192 Blendroom.'); return; }
+  if (Notification.permission === 'granted') { await ensurePush(); setStatus('Notifications are on for ' + (myDeviceName() || autoDeviceName()) + '. Manage them in Settings \u2192 Notifications \u2192 Blendroom.'); return; }
   const r = await Notification.requestPermission(); updateNotifyBtn();
   if (r === 'granted') {
-    ensurePush();
+    if (askDeviceName()) ensurePush();
     setStatus('Notifications are on. Blendroom now also appears in Settings \u2192 Notifications.');
     try { const reg = await navigator.serviceWorker.ready; await reg.showNotification('Blendroom', { body: 'Notifications are on. You will hear from me when a long mix is ready.', icon: 'icons/icon-192.png', tag: 'blendroom' }); } catch (e) {}
   }
 });
 updateNotifyBtn();
 ensurePush();
+showIdentify();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 </script>
 </body>

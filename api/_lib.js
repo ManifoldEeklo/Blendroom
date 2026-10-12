@@ -26,5 +26,7 @@ function isAdmin(req) {
 }
 const keyOf = endpoint => crypto.createHash('sha256').update(String(endpoint)).digest('hex').slice(0, 40);
 const parse = v => (typeof v === 'string' ? JSON.parse(v) : v);
+// stored value: { sub, name, auto, label, created, seen } (older entries were the bare subscription)
+const entryOf = v => { const o = parse(v); return o && o.sub ? o : { sub: o, name: '', auto: '', label: '', created: 0, seen: 0 }; };
 function fail(res, e) { res.status(e.status || 500).json({ error: e.message || 'Server error' }); }
-module.exports = { db, isAdmin, keyOf, parse, fail };
+module.exports = { db, isAdmin, keyOf, parse, entryOf, fail };
