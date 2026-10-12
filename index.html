@@ -335,6 +335,8 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
 .ident-card .btn{width:100%;justify-content:center;margin-top:6px}
 #vuMini{display:none}
 .dev-phone #vuMini{display:block;flex-basis:100%;width:100%;height:7px;order:-1;margin:-2px 0 2px;border-radius:2px}
+#masterSlider{width:130px;accent-color:var(--gold)}
+.dev-phone #masterSlider{width:110px}
 </style>
 </head>
 <body>
@@ -433,6 +435,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
           <button class="btn sq" id="tdown" aria-label="Slower">−</button>
           <input id="master" type="number" min="60" max="200" step="0.01" aria-label="Mix tempo in BPM">
           <button class="btn sq" id="tup" aria-label="Faster">+</button>
+          <input type="range" id="masterSlider" min="60" max="200" step="0.1" aria-label="Tempo fader, heard immediately while playing" title="Tempo fader: heard immediately while playing">
           <label class="chk" title="Follow the first song's tempo"><input type="checkbox" id="autoMaster" checked> Auto</label>
         </div>
         <div class="tgroup"><span class="tl">Transition</span>
@@ -447,6 +450,10 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
         </div>
         <div class="tgroup"><span class="tl">Extend</span>
           <div class="seg" id="extModeSeg" role="group" aria-label="When extending a song's end"><button data-v="push" aria-pressed="true" title="Following songs move along">Push</button><button data-v="hold" aria-pressed="false" title="The next song stays put; this one plays on underneath">Overlap</button></div>
+        </div>
+        <div class="tgroup"><span class="tl">Sound</span>
+          <div class="seg" id="enhSeg" role="group" aria-label="Mastering"><button data-v="off" aria-pressed="true" title="The mix as it is">Original</button><button data-v="warm" aria-pressed="false" title="Fuller low end, gentle glue and air, about -11 LUFS">Warm &amp; full</button><button data-v="club" aria-pressed="false" title="Punchy and loud for club systems, about -9 LUFS">Club</button><button data-v="stream" aria-pressed="false" title="Clean, -14 LUFS and -1 dB peaks, like Spotify and YouTube">Streaming</button></div>
+          <button class="btn mini" id="enhUndo" hidden title="Back to the original sound">↺ Undo</button>
         </div>
         <div class="tgroup"><span class="tl">Effects</span>
           <select id="fxAdd" aria-label="Add an effect at the play position"><option value="">＋ Add effect…</option><option value="impact">Impact (I)</option><option value="riser">Riser</option><option value="down">Downlifter</option><option value="crowd">Crowd cheer</option><option value="snippet">Snippet / repeat of a track</option><option value="sample">Your own sample…</option></select>
@@ -1294,7 +1301,7 @@ function normalize(buf) {
 
 /* ---------- playback ---------- */
 const P = { src: null, kind: null, t0: 0, off: 0, rate: 1, raf: 0 };
-function pos() { return (P.base || 0) + P.off + (ac().currentTime - P.t0) * P.rate; }
+function pos() { return ((P.base || 0) + P.off + (ac().currentTime - P.t0) * P.rate) * (P.tScale || 1); }
 function stopPlay() {
   const k = P.kind;
   if (k === 'mix') S.mixPos = clamp(pos(), 0, S.mix ? S.mix.plan.total : 0);
@@ -1307,8 +1314,8 @@ function startPlay(kind, buf, off, dur, r, onTick, base, quickEnd) {
   const c = ac(); c.resume();
   const s = c.createBufferSource(); s.buffer = buf; s.playbackRate.value = r; s.connect(meterNode());
   if (dur != null) s.start(0, off, dur); else s.start(0, off);
-  Object.assign(P, { src: s, kind, t0: c.currentTime, off, rate: r, base: base || 0, quickEnd: quickEnd == null ? null : quickEnd });
-  s.onended = () => { if (P.src === s) { if (kind === 'mix') { if (P.quickEnd != null && S.busy) { S.pendingPlay = P.quickEnd; setBusy('Still mixing the rest', S.busyFrac); } S.mixPos = P.quickEnd != null ? P.quickEnd : 0; P.kind = null; P.src = null; refreshPlayUI('mix'); } else stopPlay(); } };
+  Object.assign(P, { src: s, kind, t0: c.currentTime, off, rate: r, base: base || 0, quickEnd: quickEnd == null ? null : quickEnd, tScale: 1, bufMaster: kind === 'mix' ? S.master : 0 });
+  s.onended = () => { if (P.src === s) { if (kind === 'mix') { const qe = P.quickEnd != null ? P.quickEnd * (P.tScale || 1) : null; if (qe != null && S.busy) { S.pendingPlay = qe; setBusy('Still mixing the rest', S.busyFrac); } S.mixPos = qe != null ? qe : 0; P.kind = null; P.src = null; refreshPlayUI('mix'); } else stopPlay(); } };
   const loop = () => { if (P.src !== s) return; if (onTick) onTick(pos()); P.raf = requestAnimationFrame(loop); };
   loop(); refreshPlayUI(kind);
 }
@@ -1741,7 +1748,7 @@ function renderList() {
   $('#mixMeta').textContent = nReady ? nReady + (nReady === 1 ? ' track, ' : ' tracks, ') + fmt(planCache.total) + ' long at ' + S.master + ' BPM' : '';
 }
 function syncControls() {
-  $('#master').value = S.master; $('#autoMaster').checked = S.autoMaster;
+  $('#master').value = S.master; { const sl = $('#masterSlider'); if (sl && document.activeElement !== sl) sl.value = S.master; } $('#autoMaster').checked = S.autoMaster;
   document.querySelectorAll('#transBars button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.v === S.transBars)));
   document.querySelectorAll('#phrase button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.v === S.phrase)));
   $('#transHelp').textContent = 'About ' + (S.transBars * 240 / S.master).toFixed(1) + ' seconds at ' + S.master + ' BPM. The beats stay locked the whole time.';
@@ -2097,8 +2104,9 @@ async function buildMix(opts) {
     setBusy(opts.background ? 'Updating the mix' : 'Mixing', 0.35); await sleep(20);
     const buf = stale() ? null : await renderRange(plan, 0, plan.total, slices, f => setBusy(opts.background ? 'Updating the mix' : 'Mixing', 0.35 + 0.6 * f), stale);
     if (!buf) { S.busy = false; clearBusy(); scheduleAutoBuild(); return; }
-    setBusy('Finishing', 0.97); await sleep(0); normalize(buf);
-    S.mix = { plan, buf, peaks: mixPeaks(buf), zip: null }; S.mixDirty = (S.ver || 0) !== ver; S.mixPos = clamp(S.mixPos, 0, plan.total);
+    setBusy('Finishing', 0.97); await sleep(0); normalize(buf); const raw = buf;
+    if (S.enhance !== 'off') { setBusy('Mastering: ' + MASTER[S.enhance].name, 0.98); buf = await masterBuffer(raw, S.enhance); }
+    S.mix = { plan, buf, raw: S.device && S.device.kind === 'phone' && S.enhance === 'off' ? null : raw, peaks: mixPeaks(buf), zip: null, enh: S.enhance }; S.mixDirty = (S.ver || 0) !== ver; S.mixPos = clamp(S.mixPos, 0, plan.total);
     $('#mixResult').hidden = false; $('#dirty').hidden = true;
     renderTransList(); drawMix(0); updateMixTime(0);
     setStatus('');
@@ -2108,7 +2116,7 @@ async function buildMix(opts) {
   } catch (e) { console.error(e); S.pendingPlay = null; setStatus('The mix could not be built: ' + (e && e.message ? e.message : e)); }
   S.busy = false; clearBusy(); renderList();
   if (S.mixDirty) scheduleAutoBuild();
-  if (P.kind === 'mix' && P.quickEnd != null && S.mix && !S.mixDirty) { const cp = pos(); startPlay('mix', S.mix.buf, clamp(cp, 0, S.mix.plan.total - 0.05), null, 1, mixTick); }
+  if (P.kind === 'mix' && (P.quickEnd != null || S.liveSwitch) && S.mix && !S.mixDirty) { S.liveSwitch = false; const cp = pos(); startPlay('mix', S.mix.buf, clamp(cp, 0, S.mix.plan.total - 0.05), null, 1, mixTick); }
   if (S.pendingPlay != null) { const p = S.pendingPlay; S.pendingPlay = null; if (S.mix && !S.mixDirty) startPlay('mix', S.mix.buf, clamp(p, 0, S.mix.plan.total - 0.05), null, 1, mixTick); else playMixFrom(p); }
 }
 function renderTransList() {
@@ -2131,7 +2139,8 @@ async function playMixFrom(p) {
       setBusy('Starting playback', null);
       const slices = [];
       for (let k = 0; k < plan.items.length; k++) { const it = plan.items[k]; if (it.start < w1 && it.start + it.len > p - 4 * plan.beat) slices[k] = await getSlice(it); }
-      const qb = await renderRange(plan, p, w1, slices); normalize(qb);
+      let qb = await renderRange(plan, p, w1, slices); normalize(qb);
+      if (S.enhance !== 'off') qb = await masterBuffer(qb, S.enhance, S.masterGain[S.enhance] != null ? { gainDb: S.masterGain[S.enhance] } : null);
       S.busy = false; clearBusy();
       startPlay('mix', qb, 0, null, 1, mixTick, p, w1 < plan.total - 0.05 ? w1 : null);
       if (w1 >= plan.total - 0.05) return;
@@ -2241,7 +2250,7 @@ window.addEventListener('dragover', e => { e.preventDefault(); drop.classList.ad
 window.addEventListener('dragleave', e => { if (!e.relatedTarget) drop.classList.remove('over'); });
 window.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
 
-function setMaster(v) { S.master = clamp(Math.round(v * 2) / 2, 60, 200); S.autoMaster = false; markDirty(); renderList(); }
+function setMaster(v) { liveTempo(clamp(Math.round(v * 100) / 100, 60, 200)); S.autoMaster = false; markDirty(); renderList(); if (P.kind === 'mix') { clearTimeout(S.liveT); S.liveT = setTimeout(() => { if (P.kind === 'mix') buildMix({ background: true }); }, 700); } }
 $('#master').addEventListener('change', e => { const v = parseFloat(e.target.value); if (isFinite(v)) setMaster(v); else syncControls(); });
 $('#tdown').addEventListener('click', () => setMaster(S.master - 1));
 $('#tup').addEventListener('click', () => setMaster(S.master + 1));
@@ -3096,6 +3105,129 @@ document.addEventListener('keydown', e => {
   if (k === 'i' && planCache && planCache.items.length) { e.preventDefault(); addFx('impact'); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && S.fxSel) { e.preventDefault(); S.fx = S.fx.filter(x => x.id !== S.fxSel); selectFx(null); markDirty(); }
 });
+
+/* ---------- mastering ("Sound" presets): EQ -> glue compression -> saturation -> mid/side -> loudness + limiter ---------- */
+const MASTER = {
+  warm:   { name: 'Warm & full', lufs: -11, ceil: -1,   low: 2,   mud: -1.5, pres: 0.5, air: 2,   sat: 0.12, thr: -16, ratio: 2,   width: 1.15 },
+  club:   { name: 'Club',        lufs: -9,  ceil: -0.5, low: 3,   mud: -2,   pres: 1,   air: 2.5, sat: 0.2,  thr: -18, ratio: 2.5, width: 1.2 },
+  stream: { name: 'Streaming',   lufs: -14, ceil: -1,   low: 1,   mud: -1,   pres: 0.5, air: 1.5, sat: 0.06, thr: -14, ratio: 1.5, width: 1.1 }
+};
+S.enhance = 'off'; S.masterGain = {};
+async function measureLUFS(buf) {
+  const sr = buf.sampleRate, oc = new OfflineAudioContext(2, buf.length, sr), s = oc.createBufferSource(); s.buffer = buf;
+  const f1 = oc.createBiquadFilter(); f1.type = 'highshelf'; f1.frequency.value = 1681; f1.gain.value = 4;
+  const f2 = oc.createBiquadFilter(); f2.type = 'highpass'; f2.frequency.value = 38; f2.Q.value = 0.5;
+  s.connect(f1); f1.connect(f2); f2.connect(oc.destination); s.start();
+  const k = await oc.startRendering(), L = k.getChannelData(0), R = k.getChannelData(1), hop = Math.round(0.1 * sr), nh = Math.floor(L.length / hop);
+  const hs = new Float64Array(nh);
+  for (let h = 0; h < nh; h++) { let a = 0; const o = h * hop; for (let i = 0; i < hop; i++) { const l = L[o + i], r = R[o + i]; a += l * l + r * r; } hs[h] = a; }
+  const pw = []; for (let b = 0; b + 4 <= nh; b++) pw.push((hs[b] + hs[b + 1] + hs[b + 2] + hs[b + 3]) / (4 * hop));
+  const lk = p => -0.691 + 10 * Math.log10(p + 1e-12), avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const g1 = pw.filter(p => lk(p) > -70); if (!g1.length) return -70;
+  const rel = lk(avg(g1)) - 10, g2 = g1.filter(p => lk(p) > rel);
+  return lk(avg(g2.length ? g2 : g1));
+}
+function scaleBuf(buf, g) { for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= g; } }
+function limitBuf(buf, ceilDb) {
+  // look-ahead peak limiter (5 ms) with smooth 80 ms release, then a hard safety ceiling
+  const c = Math.pow(10, ceilDb / 20), L = buf.getChannelData(0), R = buf.getChannelData(1), n = L.length, sr = buf.sampleRate;
+  const la = Math.max(1, Math.round(0.005 * sr)), rel = Math.exp(-1 / (0.08 * sr)), cap = la + 2;
+  const qi = new Int32Array(cap), qv = new Float32Array(cap); let qh = 0, qt = 0, qn = 0, g = 1;
+  const need = j => { if (j >= n) return 1; const p = Math.max(Math.abs(L[j]), Math.abs(R[j])); return p > c ? c / p : 1; };
+  for (let j = 0; j < n + la; j++) {
+    const v = need(j);
+    while (qn && qv[(qt - 1 + cap) % cap] >= v) { qt = (qt - 1 + cap) % cap; qn--; }
+    qi[qt] = j; qv[qt] = v; qt = (qt + 1) % cap; qn++;
+    const i = j - la; if (i < 0) continue;
+    while (qn && qi[qh] < i) { qh = (qh + 1) % cap; qn--; }
+    const gm = qn ? qv[qh] : 1;
+    g = gm < g ? gm : Math.min(gm, 1 - (1 - g) * rel);
+    let l = L[i] * g, r = R[i] * g; if (l > c) l = c; else if (l < -c) l = -c; if (r > c) r = c; else if (r < -c) r = -c;
+    L[i] = l; R[i] = r;
+  }
+}
+async function masterBuffer(buf, key, opts) {
+  const pz = MASTER[key]; if (!pz) return buf; opts = opts || {};
+  const sr = buf.sampleRate, oc = new OfflineAudioContext(2, buf.length, sr), src = oc.createBufferSource(); src.buffer = buf;
+  const bq = (type, f, gain, q) => { const b = oc.createBiquadFilter(); b.type = type; b.frequency.value = f; if (gain != null) b.gain.value = gain; if (q != null) b.Q.value = q; return b; };
+  const G = v => { const x = oc.createGain(); x.gain.value = v; return x; };
+  // 1. broad, gentle EQ: clean the sub rumble, warm low shelf, a touch of presence
+  const hp = bq('highpass', 25, null, 0.7), low = bq('lowshelf', 90, pz.low), pres = bq('peaking', 3200, pz.pres, 0.7);
+  // 2. glue compression: low ratio, slow attack keeps the punch
+  const comp = oc.createDynamicsCompressor(); comp.threshold.value = pz.thr; comp.ratio.value = pz.ratio; comp.knee.value = 6; comp.attack.value = 0.03; comp.release.value = 0.2;
+  // 3. parallel saturation: harmonic density for a fuller sound
+  const shaper = oc.createWaveShaper(), curve = new Float32Array(2048), kd = 2.5;
+  for (let i = 0; i < 2048; i++) { const x = i / 1023.5 - 1; curve[i] = Math.tanh(kd * x) / Math.tanh(kd); }
+  shaper.curve = curve; shaper.oversample = '4x';
+  const dry = G(1 - pz.sat * 0.5), wet = G(pz.sat), bus = G(1);
+  src.connect(hp); hp.connect(low); low.connect(pres); pres.connect(comp);
+  comp.connect(dry); dry.connect(bus); comp.connect(shaper); shaper.connect(wet); wet.connect(bus);
+  // 4. mid/side: de-clutter the centre around 300 Hz, keep lows mono, add air and width to the sides
+  const split = oc.createChannelSplitter(2), merge = oc.createChannelMerger(2);
+  const lm = G(0.5), rm = G(0.5), ls = G(0.5), rs = G(-0.5), mid = G(1), side = G(1);
+  bus.connect(split); split.connect(lm, 0); split.connect(ls, 0); split.connect(rm, 1); split.connect(rs, 1);
+  lm.connect(mid); rm.connect(mid); ls.connect(side); rs.connect(side);
+  const mud = bq('peaking', 300, pz.mud, 0.8), sideHp = bq('highpass', 120, null, 0.7), air = bq('highshelf', 11000, pz.air), wid = G(pz.width), neg = G(-1);
+  mid.connect(mud); side.connect(sideHp); sideHp.connect(air); air.connect(wid);
+  mud.connect(merge, 0, 0); mud.connect(merge, 0, 1); wid.connect(merge, 0, 0); wid.connect(neg); neg.connect(merge, 0, 1);
+  merge.connect(oc.destination); src.start();
+  const out = await oc.startRendering(), ceil = pz.ceil - 0.3;
+  // 5. loudness to the preset target (LUFS, BS.1770 gating) and a true-peak-safe ceiling
+  let gainDb;
+  if (opts.gainDb != null) gainDb = opts.gainDb;
+  else gainDb = pz.lufs - await measureLUFS(out);
+  scaleBuf(out, Math.pow(10, gainDb / 20)); limitBuf(out, ceil);
+  if (opts.gainDb == null) {
+    let lu = await measureLUFS(out), d = pz.lufs - lu;
+    if (d > 0.4) { scaleBuf(out, Math.pow(10, d / 20)); limitBuf(out, ceil); gainDb += d; lu = await measureLUFS(out); }
+    out.lufs = lu; S.masterGain[key] = gainDb;
+  }
+  let pk = 0; for (let c = 0; c < 2; c++) { const d = out.getChannelData(c); for (let i = 0; i < d.length; i += 2) { const a = Math.abs(d[i]); if (a > pk) pk = a; } }
+  out.peakDb = 20 * Math.log10(pk + 1e-9);
+  return out;
+}
+function updateEnhUI() {
+  document.querySelectorAll('#enhSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === S.enhance)));
+  const u = $('#enhUndo'); if (u) u.hidden = S.enhance === 'off';
+}
+async function setEnhance(key) {
+  if (key === S.enhance) return;
+  S.enhance = key; updateEnhUI();
+  if (!S.mix || S.mixDirty || !S.mix.raw) { markDirty(); if (P.kind === 'mix') playMixFrom(pos()); return; }
+  await waitIdle();
+  S.busy = true;
+  try {
+    setBusy(key === 'off' ? 'Restoring the original' : 'Mastering: ' + MASTER[key].name, null);
+    S.mix.buf = key === 'off' ? S.mix.raw : await masterBuffer(S.mix.raw, key);
+    S.mix.peaks = mixPeaks(S.mix.buf); S.mix.zip = null; S.mix.mp3 = null; S.mix.enh = key;
+  } catch (e) { console.error(e); } finally { S.busy = false; clearBusy(); }
+  if (P.kind === 'mix') startPlay('mix', S.mix.buf, clamp(pos(), 0, S.mix.plan.total - 0.05), null, 1, mixTick);
+  drawMix(P.kind === 'mix' ? pos() : S.mixPos);
+  setStatus(key === 'off' ? 'Back to the original sound.' : MASTER[key].name + ': ' + (S.mix.buf.lufs != null ? S.mix.buf.lufs.toFixed(1) + ' LUFS, ' : '') + 'peaks ' + S.mix.buf.peakDb.toFixed(1) + ' dB.');
+}
+$('#enhSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setEnhance(b.dataset.v); });
+$('#enhUndo').addEventListener('click', () => setEnhance('off'));
+updateEnhUI();
+/* ---------- live tempo: changes are heard immediately while playing ---------- */
+function liveTempo(newM) {
+  newM = clamp(newM, 60, 200); const old = S.master; if (Math.abs(newM - old) < 1e-6) return;
+  S.master = newM; S.autoMaster = false;
+  const c = ac(), now = c.currentTime;
+  if (P.src && P.kind === 'mix') {
+    const bp = (P.base || 0) + P.off + (now - P.t0) * P.rate;
+    P.base = 0; P.off = bp; P.t0 = now; P.rate = newM / (P.bufMaster || old); P.tScale = (P.bufMaster || old) / newM;
+    P.src.playbackRate.setValueAtTime(P.rate, now); S.liveSwitch = true;
+  } else if (P.src && /^(track|mstart|msec):/.test(P.kind || '')) {
+    const t = S.tracks.find(x => P.kind.endsWith(':' + x.id));
+    if (t) { const sp = P.off + (now - P.t0) * P.rate; P.off = sp; P.t0 = now; P.rate = rate(t); P.src.playbackRate.setValueAtTime(P.rate, now); }
+  }
+  const mi = $('#master'); if (mi && document.activeElement !== mi) mi.value = Math.round(newM * 100) / 100;
+  const sl = $('#masterSlider'); if (sl && document.activeElement !== sl) sl.value = newM;
+  const am = $('#autoMaster'); if (am) am.checked = false;
+  planCache = computePlan(); drawMix(P.kind === 'mix' ? pos() : S.mixPos); updateMixTime(P.kind === 'mix' ? pos() : S.mixPos);
+}
+$('#masterSlider').addEventListener('input', e => liveTempo(+e.target.value));
+$('#masterSlider').addEventListener('change', e => setMaster(+e.target.value));
 
 function setTab(name) {
   S.tab = name;
