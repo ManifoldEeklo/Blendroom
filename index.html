@@ -333,6 +333,8 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
 .ident-card input:focus{outline:2px solid var(--gold);outline-offset:1px}
 .ident-err{min-height:20px;color:#FF8A8A!important;font-weight:700;margin:12px 0 4px!important}
 .ident-card .btn{width:100%;justify-content:center;margin-top:6px}
+#vuMini{display:none}
+.dev-phone #vuMini{display:block;flex-basis:100%;width:100%;height:7px;order:-1;margin:-2px 0 2px;border-radius:2px}
 </style>
 </head>
 <body>
@@ -497,7 +499,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
         <label class="opt"><input type="checkbox" id="aiFromStart" checked><span>Start from song start</span></label>
         <label class="opt"><input type="checkbox" id="aiToEnd" checked><span>End on real ending</span></label>
         <label class="opt"><input type="checkbox" id="aiFx" checked><span>Risers &amp; impacts</span></label>
-        <label class="opt"><input type="checkbox" id="fxIntro" checked><span>Crowd intro</span></label>
+        <label class="opt"><input type="checkbox" id="fxIntro"><span>Crowd intro</span></label>
         <label class="opt"><input type="checkbox" id="fxOutro" checked><span>Crowd outro</span></label>
       </div>
       <div class="tgroup manorder"><span class="tl">Order for Manual sections</span><div class="seg" id="aiManOrder" role="group" aria-label="Track order when using the Manual sections"><button data-v="arc" aria-pressed="true">AI energy arc</button><button data-v="keep" aria-pressed="false">Keep my order</button><button data-v="random" aria-pressed="false">Random</button></div></div>
@@ -508,6 +510,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
 </main>
 
 <footer class="player" id="mixPanel" aria-label="Player">
+  <canvas id="vuMini" aria-hidden="true"></canvas>
   <div class="tport" role="group" aria-label="Transport">
     <button class="btn sq" id="tPrev" aria-label="Previous song" title="Previous song">⏮</button>
     <button class="btn primary play" id="playMix" title="Space plays or pauses. In the Mix tab, press N to start the next song's section at the current moment.">Play mix</button>
@@ -548,7 +551,7 @@ const STYLE_HELP = {
   cut: 'Switches instantly on the first downbeat of the next section. Best into a big drop.'
 };
 
-const S = { tracks: [], master: 124, autoMaster: true, phrase: 8, dragSnap: 'beat', extMode: 'push', targetMin: 5, allowRepeats: true, aiFromStart: true, aiToEnd: true, aiArc: true, aiFx: true, fxIntro: true, fxOutro: true, fadeUnit: 'bar', transBars: 2, style: 'bassswap', sectionBars: 32, snap: true, mix: null, mixDirty: false, mixPos: 0, busy: false };
+const S = { tracks: [], master: 124, autoMaster: true, phrase: 8, dragSnap: 'beat', extMode: 'push', targetMin: 5, allowRepeats: true, aiFromStart: true, aiToEnd: true, aiArc: true, aiFx: true, fxIntro: false, fxOutro: true, fadeUnit: 'bar', transBars: 2, style: 'bassswap', sectionBars: 32, snap: true, mix: null, mixDirty: false, mixPos: 0, busy: false };
 let uid = 0;
 
 /* ---------- audio context & buffers ---------- */
@@ -1361,6 +1364,23 @@ function meterNode() {
 const VU = { lvl: [-90, -90], pk: [-90, -90], pkT: [0, 0], clip: [0, 0], last: 0 };
 const VU_LO = -48;
 function vuHue(db) { const f = clamp((db - VU_LO) / -VU_LO, 0, 1); return f < 0.75 ? 130 - f / 0.75 * 75 : 55 - (f - 0.75) / 0.25 * 55; }
+function drawMiniVU() {
+  const cv = $('#vuMini'); if (!cv || cv.offsetParent === null) return;
+  const { g, W, H } = sizeCanvas(cv); if (!W) return;
+  const n = Math.max(24, Math.floor(W / 7)), sw = W / n, rowH = (H - 2) / 2, step = -VU_LO / n;
+  for (let ch = 0; ch < 2; ch++) {
+    const y = ch * (rowH + 2); let pkSeg = -1;
+    for (let i = 0; i < n; i++) {
+      const db = VU_LO + (i + 1) * step, hue = vuHue(db), lit = VU.lvl[ch] >= db - step * 0.5;
+      if (VU.pk[ch] >= db - step * 0.5) pkSeg = i;
+      if (lit) { g.fillStyle = 'hsl(' + hue + ',95%,55%)'; g.shadowColor = g.fillStyle; g.shadowBlur = 5; }
+      else { g.fillStyle = 'hsla(' + hue + ',70%,45%,0.16)'; g.shadowBlur = 0; }
+      g.fillRect(i * sw + 0.5, y, sw - 1.5, rowH);
+    }
+    g.shadowBlur = 0;
+    if (pkSeg > 0 && VU.pk[ch] > VU_LO + 2) { g.fillStyle = '#fff'; g.fillRect(pkSeg * sw + 0.5, y, sw - 1.5, rowH); }
+  }
+}
 function vuLoop(now) {
   requestAnimationFrame(vuLoop);
   const dt = VU.last ? Math.min(0.1, (now - VU.last) / 1000) : 0; VU.last = now;
@@ -1380,6 +1400,7 @@ function vuLoop(now) {
     const f = S.busyFrac != null ? S.busyFrac : 0.5 + 0.45 * Math.sin(now / 240 + ch * 1.4);
     VU.lvl[ch] = VU_LO + -VU_LO * f * 0.97; VU.pk[ch] = VU.lvl[ch]; VU.pkT[ch] = now;
   }
+  drawMiniVU();
   const cv = $('#vucv'); if (!cv || !cv.clientWidth) return;
   const { g, W, H } = sizeCanvas(cv);
   const wide = W > 50, gut = wide ? 22 : 4, colW = (W - gut) / 2, top = 18, bot = 18, mh = H - top - bot;
