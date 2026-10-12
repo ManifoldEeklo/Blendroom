@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blendroom Messages</title>
+<link rel="manifest" href="/admin/manifest.webmanifest">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BR Messages">
+<link rel="apple-touch-icon" href="/icons/msg-180.png">
+<link rel="icon" type="image/png" href="/icons/msg-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Figtree:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#000;--panel:#0B0B0F;--panel2:#15151B;--line:#2B2B33;--ink:#fff;--muted:#9A9AA6;--gold:#D4AF37;--gold2:#F7D774;--bad:#FF6B6B;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 'Figtree',system-ui,-apple-system,sans-serif}
+body{padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
+.wrap{max-width:560px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 18px}
+.brand{font-family:'Bricolage Grotesque','Figtree',sans-serif;font-weight:800;font-size:28px;letter-spacing:-.035em;line-height:1}
+.brand .a{color:var(--gold)} .brand .b{color:#ECECEC} .brand small{display:block;font-family:'Figtree',sans-serif;font-size:13px;font-weight:700;color:var(--muted);letter-spacing:0;margin-top:4px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:16px}
+label{display:block;font-size:13px;font-weight:700;color:var(--muted);margin:14px 0 6px}
+label:first-child{margin-top:0}
+input,textarea{width:100%;font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+textarea{min-height:110px;resize:vertical}
+input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+.count{float:right;font-weight:600}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-weight:800;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:12px 18px;cursor:pointer;min-height:46px}
+.btn.primary{background:var(--gold);color:#000;border-color:var(--gold);width:100%;font-size:17px;margin-top:16px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent;min-height:38px;padding:8px 14px;font-weight:700}
+.stat{display:flex;align-items:baseline;gap:10px}
+.stat b{font-family:'Bricolage Grotesque',sans-serif;font-size:40px;color:var(--gold);line-height:1}
+.stat span{color:var(--muted);font-weight:600}
+.preview{display:flex;gap:12px;align-items:flex-start;background:rgba(40,40,46,.85);border-radius:16px;padding:12px 14px;margin-top:16px}
+.preview img{width:38px;height:38px;border-radius:9px;flex:none}
+.preview .pt{font-weight:800;font-size:15px}
+.preview .pb{font-size:15px;color:#e6e6ea;white-space:pre-wrap;word-break:break-word}
+.preview .pa{font-size:12px;color:var(--muted);float:right}
+.msg{min-height:22px;font-weight:700;margin-top:12px}
+.msg.ok{color:var(--gold2)} .msg.err{color:var(--bad)}
+.hist{list-style:none;margin:0;padding:0}
+.hist li{border-top:1px solid var(--line);padding:12px 0}
+.hist li:first-child{border-top:0;padding-top:0}
+.hist .ht{font-weight:800}
+.hist .hm{color:#d8d8de;white-space:pre-wrap;word-break:break-word}
+.hist .hi{font-size:13px;color:var(--muted);margin-top:2px}
+.empty{color:var(--muted)}
+h2{font-family:'Bricolage Grotesque',sans-serif;font-size:20px;margin:0 0 12px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="a">Blend</span><span class="b">room</span><small>Messages</small></div>
+    <button class="btn ghost" id="lock" hidden>Lock</button>
+  </header>
+
+  <section class="card" id="login">
+    <h2>Unlock</h2>
+    <label for="token">Admin password</label>
+    <input id="token" type="password" autocomplete="current-password" placeholder="Your ADMIN_TOKEN">
+    <button class="btn primary" id="unlock">Unlock</button>
+    <p class="msg" id="loginMsg" role="status"></p>
+  </section>
+
+  <div id="app" hidden>
+    <section class="card">
+      <div class="stat"><b id="devices">0</b><span id="devLbl">devices will receive your message</span></div>
+    </section>
+
+    <section class="card">
+      <h2>New message</h2>
+      <label for="title">Title</label>
+      <input id="title" maxlength="80" value="Blendroom">
+      <label for="body">Message <span class="count" id="count">0 / 300</span></label>
+      <textarea id="body" maxlength="300" placeholder="New mix online tonight at 21:00 🎉"></textarea>
+      <label for="url">Opens when tapped</label>
+      <input id="url" value="/" placeholder="/ or a full https:// link">
+      <div class="preview" aria-label="Preview">
+        <img src="/icons/icon-192.png" alt="">
+        <div style="flex:1;min-width:0"><span class="pa">now</span><div class="pt" id="pTitle">Blendroom</div><div class="pb" id="pBody">Your message appears here.</div></div>
+      </div>
+      <button class="btn primary" id="send">Send to all devices</button>
+      <p class="msg" id="sendMsg" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card">
+      <h2>Sent</h2>
+      <ul class="hist" id="hist"></ul>
+    </section>
+  </div>
+</div>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let token = '';
+try { token = localStorage.getItem('br-admin') || ''; } catch (e) {}
+let devices = 0;
+async function api(method, body) {
+  const r = await fetch('/api/send', { method, headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('Error ' + r.status));
+  return j;
+}
+function when(ms) { const d = new Date(ms); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); }
+function render(data) {
+  devices = data.devices || 0;
+  $('#devices').textContent = devices;
+  $('#devLbl').textContent = devices === 1 ? 'device will receive your message' : 'devices will receive your message';
+  $('#send').textContent = devices ? 'Send to ' + devices + (devices === 1 ? ' device' : ' devices') : 'No devices yet';
+  $('#send').disabled = !devices;
+  const h = data.history || [];
+  $('#hist').innerHTML = h.length ? h.map(m => '<li><div class="ht">' + esc(m.title) + '</div><div class="hm">' + esc(m.body) + '</div><div class="hi">' + when(m.at) + ' \u00b7 ' + m.sent + (m.sent === 1 ? ' device' : ' devices') + '</div></li>').join('') : '<li class="empty">Nothing sent yet.</li>';
+}
+async function load() {
+  try { const d = await api('GET'); $('#login').hidden = true; $('#app').hidden = false; $('#lock').hidden = false; render(d); return true; }
+  catch (e) { $('#login').hidden = false; $('#app').hidden = true; $('#lock').hidden = true; if (token) $('#loginMsg').textContent = e.message; $('#loginMsg').className = 'msg err'; return false; }
+}
+$('#unlock').addEventListener('click', async () => {
+  token = $('#token').value.trim(); if (!token) return;
+  $('#loginMsg').textContent = 'Checking\u2026'; $('#loginMsg').className = 'msg';
+  if (await load()) { try { localStorage.setItem('br-admin', token); } catch (e) {} $('#loginMsg').textContent = ''; }
+});
+$('#token').addEventListener('keydown', e => { if (e.key === 'Enter') $('#unlock').click(); });
+$('#lock').addEventListener('click', () => { token = ''; try { localStorage.removeItem('br-admin'); } catch (e) {} $('#token').value = ''; load(); });
+function preview() {
+  $('#pTitle').textContent = $('#title').value || 'Blendroom';
+  $('#pBody').textContent = $('#body').value || 'Your message appears here.';
+  $('#count').textContent = $('#body').value.length + ' / 300';
+}
+['#title', '#body'].forEach(s => $(s).addEventListener('input', preview));
+$('#send').addEventListener('click', async () => {
+  const body = $('#body').value.trim(); if (!body) { $('#sendMsg').textContent = 'Write a message first.'; $('#sendMsg').className = 'msg err'; return; }
+  if (!confirm('Send this message to ' + devices + (devices === 1 ? ' device?' : ' devices?'))) return;
+  const btn = $('#send'); btn.disabled = true; btn.textContent = 'Sending\u2026';
+  try {
+    const r = await api('POST', { title: $('#title').value.trim() || 'Blendroom', body, url: $('#url').value.trim() || '/' });
+    $('#sendMsg').textContent = 'Sent to ' + r.sent + (r.sent === 1 ? ' device' : ' devices') + (r.removed ? '. ' + r.removed + ' uninstalled ' + (r.removed === 1 ? 'device was' : 'devices were') + ' removed' : '') + (r.failed ? '. ' + r.failed + ' failed' : '') + '.';
+    $('#sendMsg').className = 'msg ok'; $('#body').value = ''; preview();
+  } catch (e) { $('#sendMsg').textContent = e.message; $('#sendMsg').className = 'msg err'; }
+  await load();
+});
+preview(); load();
+</script>
+</body>
+</html>

@@ -3173,6 +3173,21 @@ syncControls();
 })();
 requestAnimationFrame(vuLoop);
 getDownloads().then(d => { if (!d) $('#download').hidden = true; });
+function b64ToU8(b64) { const pad = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, c => c.charCodeAt(0)); }
+async function ensurePush() {
+  try {
+    if (!('PushManager' in window) || !('Notification' in window) || Notification.permission !== 'granted' || location.protocol === 'file:') return false;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const r = await fetch('/api/vapid-public-key', { cache: 'no-store' }); if (!r.ok) return false;
+      const { key } = await r.json(); if (!key) return false;
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(key) });
+    }
+    const r2 = await fetch('/api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub.toJSON() }) });
+    return r2.ok;
+  } catch (e) { console.warn('push', e); return false; }
+}
 async function notifyDone(body) {
   try {
     if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
@@ -3193,11 +3208,13 @@ $('#notifyBtn').addEventListener('click', async () => {
   if (Notification.permission === 'granted') { setStatus('Notifications are on. Manage them in Settings \u2192 Notifications \u2192 Blendroom.'); return; }
   const r = await Notification.requestPermission(); updateNotifyBtn();
   if (r === 'granted') {
+    ensurePush();
     setStatus('Notifications are on. Blendroom now also appears in Settings \u2192 Notifications.');
     try { const reg = await navigator.serviceWorker.ready; await reg.showNotification('Blendroom', { body: 'Notifications are on. You will hear from me when a long mix is ready.', icon: 'icons/icon-192.png', tag: 'blendroom' }); } catch (e) {}
   }
 });
 updateNotifyBtn();
+ensurePush();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 </script>
 </body>

@@ -1,16 +1,80 @@
 {
   "cleanUrls": false,
   "headers": [
-    { "source": "/sw.js", "headers": [
-      { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
-      { "key": "Service-Worker-Allowed", "value": "/" }
-    ] },
-    { "source": "/index.html", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] },
-    { "source": "/", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] },
-    { "source": "/manifest.webmanifest", "headers": [
-      { "key": "Content-Type", "value": "application/manifest+json" },
-      { "key": "Cache-Control", "value": "no-cache" }
-    ] },
-    { "source": "/icons/(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=604800" } ] }
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/icons/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=604800"
+        }
+      ]
+    },
+    {
+      "source": "/admin/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        }
+      ]
+    },
+    {
+      "source": "/admin/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex"
+        }
+      ]
+    }
   ]
 }
