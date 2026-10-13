@@ -400,6 +400,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
       <span class="grow"></span>
       <button class="btn" id="autoSec">Re-pick best</button>
       <button class="btn" id="smart">Order by key</button>
+      <button class="btn" id="stemsAll" title="Split every song into stems with AI, one after the other">🎛 Stems for all</button>
       <label class="btn" for="file2">+ Add</label>
       <input id="file2" type="file" accept="audio/*,.mp3" multiple hidden>
     </div>
@@ -540,7 +541,7 @@ const fmt = s => { if (!isFinite(s)) return '–'; s = Math.max(0, s); return Ma
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-const STYLES = { ai: 'AI DJ (surprise me)', loopin: 'Loop in (next track)', bassswap: 'Bass swap', beatdrop: 'Beat drop', blend: 'Smooth blend', filter: 'Filter sweep', phaser: 'Phaser', loop: 'Loop repeat', backspin: 'Backspin', echo: 'Echo out', cut: 'Hard cut' };
+const STYLES = { ai: 'AI DJ (surprise me)', stemswap: 'Stem swap (AI stems)', loopin: 'Loop in (next track)', bassswap: 'Bass swap', beatdrop: 'Beat drop', blend: 'Smooth blend', filter: 'Filter sweep', phaser: 'Phaser', loop: 'Loop repeat', backspin: 'Backspin', echo: 'Echo out', cut: 'Hard cut' };
 const LOOPS = [['0.25', '¼ beat'], ['0.5', '½ beat'], ['1', '1 beat'], ['2', '2 beats'], ['4', '1 bar'], ['roll', 'Roll (1 → ¼ beat)']];
 const loopBeatsOf = t => t.loopBeats == null ? 1 : t.loopBeats;
 const loopLabel = t => (LOOPS.find(([k]) => k === String(loopBeatsOf(t))) || LOOPS[2])[1];
@@ -550,6 +551,7 @@ const STYLE_HELP = {
   filter: 'Sweeps a high-pass filter up the outgoing track while the next one rises underneath it.',
   ai: 'Picks a different move for every transition, the way a pro DJ reads the set: it checks whether the keys fit and whether the energy rises or falls, avoids repeating itself, and now and then throws in a surprise.',
   beatdrop: 'The beat drains out of the outgoing track while the next track kicks in with only its drums and bass. Then the old instruments fade away as the new track opens up.',
+  stemswap: 'Uses AI-separated stems like a DJ on stem decks: the old vocals leave first, the new drums come in, the instruments cross over, then the bass swaps on the one and the new vocals land last. Needs stems for both songs; otherwise it plays as a bass swap.',
   loopin: 'The next track enters as a repeating loop of its first beats, opening up as it builds, then drops in on the first beat of its section.',
   loop: 'The outgoing track grabs its last few beats and repeats them as a loop while the next track rises underneath. Choose the loop length per transition, or a roll that tightens from 1 beat to ¼ beat.',
   backspin: 'The outgoing track spins backwards like a pulled-back record and stops, and the next track drops in exactly on the first beat of its phrase.',
@@ -859,7 +861,8 @@ function computePlan() {
     A.tailS = Math.max(0, A.start + A.d + A.post - Math.max(A.start + A.d, A.endOut));
     const sa0 = A.s + (A.tauOut - A.start) * A.r, sa1 = A.s + (A.endOut - A.start) * A.r, sb1 = B.s + (A.endOut - B.start) * B.r;
     A.vocA = vocalIn(A.t, sa0, sa1); A.vocB = vocalIn(B.t, B.s, sb1); A.quietA = quietRatio(A.t, sa0, sa1);
-    A.clash = A.endOut - A.tauOut > 0.05 && A.vocA > 0.35 && A.vocB > 0.35 && !['cut', 'backspin'].includes(A.outStyle);
+    if (A.outStyle === 'stemswap' && !(stemsCover(A) && stemsCover(B))) { A.outStyle = 'bassswap'; A.stemFallback = true; }
+    A.clash = A.endOut - A.tauOut > 0.05 && A.vocA > 0.35 && A.vocB > 0.35 && !['cut', 'backspin', 'stemswap'].includes(A.outStyle);
   }
   items.forEach(it => { it.len = it.d + it.post; });
   const total = items.reduce((m, it) => Math.max(m, it.start + it.len), 0) + (S.fxOutro && items.length ? 4 : 0);
@@ -888,9 +891,10 @@ function aiPick(a, b, i, prev) {
   if (clashAB) { w.loopin *= 0.4; w.cut *= 4; w.backspin *= 3; w.blend *= 0.1; w.beatdrop *= 0.2; w.bassswap *= 0.3; w.phaser *= 0.3; w.filter *= 0.3; w.loop *= 0.4; w.echo *= 0.6; why.unshift('both songs have vocals here, so it never stacks them'); }
   else if (qA < 0.45) { w.cut *= 2.5; w.beatdrop *= 2.2; w.blend *= 0.5; why.unshift('the old song goes quiet here, the perfect moment for the new beat or vocals to drop'); }
   else if (vA < 0.2 && vB > 0.35) { w.blend *= 1.8; w.beatdrop *= 1.6; w.bassswap *= 1.3; why.unshift('the old song is instrumental here, so the new vocals can come in on top'); }
+  if (a.t.stems && b.t.stems && stemsFresh(a.t) && stemsFresh(b.t)) { w.stemswap = clashAB ? 6 : 4; why.push('both songs have AI stems, so it blends them part by part'); }
   const keys = Object.keys(w), tot = keys.reduce((s, k) => s + w[k], 0); let x = R() * tot, style = keys[0];
   for (const k of keys) { x -= w[k]; if (x <= 0) { style = k; break; } }
-  const lens = { loopin: [2, 4], cut: [1], backspin: [1, 2], echo: [1, 2], loop: [2, 4], bassswap: [2, 4], beatdrop: [4, 8], blend: [8, 16], filter: [4, 8], phaser: [4, 8] }[style];
+  const lens = { stemswap: [4, 8], loopin: [2, 4], cut: [1], backspin: [1, 2], echo: [1, 2], loop: [2, 4], bassswap: [2, 4], beatdrop: [4, 8], blend: [8, 16], filter: [4, 8], phaser: [4, 8] }[style];
   const loops = [0.5, 1, 'roll', 'roll', 0.25];
   return { style, bars: clashAB ? lens[0] : lens[Math.floor(R() * lens.length)], loop: style === 'loop' || style === 'loopin' ? loops[Math.floor(R() * loops.length)] : null, why: why.length ? why.join(', ') : 'it fits the flow of the set' };
 }
@@ -923,7 +927,7 @@ class Env {
     }
   }
 }
-const newEnvs = () => ({ fader: new Env(1), fo: new Env(1), fi: new Env(1), low: new Env(0), hp: new Env(20), lp: new Env(20000), send: new Env(0), phw: new Env(0), phd: new Env(1) });
+const newEnvs = () => ({ sd: new Env(1), sb: new Env(1), so: new Env(1), sv: new Env(1), fader: new Env(1), fo: new Env(1), fi: new Env(1), low: new Env(0), hp: new Env(20), lp: new Env(20000), send: new Env(0), phw: new Env(0), phd: new Env(1) });
 function fadeIn(env, t0, t1) { env.set(t0, 0); for (let k = 1; k <= 12; k++) { const x = k / 12; env.lin(t0 + (t1 - t0) * x, Math.sin(x * Math.PI / 2)); } }
 function fadeOut(env, t0, t1) { env.set(t0, 1); for (let k = 1; k <= 12; k++) { const x = k / 12; env.lin(t0 + (t1 - t0) * x, Math.cos(x * Math.PI / 2)); } }
 const KILL = -30;
@@ -982,6 +986,18 @@ function applyTransition(style, A, B, tau, T, beat) {
       B.low.set(tau, KILL).set(end - q, KILL).lin(end, 0);
       A.low.set(end - q, 0).lin(end, KILL);
       fadeOut(A.fader, mid, end); break;
+    case 'stemswap': {
+      const b1 = tau + Math.max(1, Math.round(T / 3 / beat)) * beat, b2 = tau + Math.max(2, Math.round(2 * T / 3 / beat)) * beat;
+      B.sd.set(tau, 0).lin(Math.min(b1, end - q), 1);
+      B.so.set(tau, 0).set(Math.min(b1, end - q), 0).lin(Math.min(b2, end - q), 1);
+      B.sb.set(tau, 0).set(end - q, 0).lin(end, 1);
+      B.sv.set(tau, 0).set(end - q, 0).lin(end, 1);
+      A.sv.set(tau, 1).lin(Math.min(b1, end - q), 0);
+      A.sd.set(Math.min(b1, end - q), 1).lin(Math.min(b2, end - q), 0);
+      A.sb.set(end - q, 1).lin(end, 0);
+      A.so.set(Math.min(b2, end - q), 1).lin(end, 0);
+      break;
+    }
     default: // cut on the phrase boundary
       A.fader.set(end - 0.01, 1).lin(end, 0);
       B.fader.set(tau, 0).set(end - 0.01, 0).lin(end, 1);
@@ -1022,7 +1038,15 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
       const lp = oc.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.8;
       const fader = oc.createGain();
       const foG = oc.createGain(), fiG = oc.createGain();
-      src.connect(trim); trim.connect(low); low.connect(lp); lp.connect(hp); fader.connect(fiG); fiG.connect(foG); foG.connect(bus);
+      const prvS = i > 0 ? items[i - 1] : null, useStems = sl.stems && (it.outStyle === 'stemswap' || (prvS && prvS.outStyle === 'stemswap'));
+      const stemSrcs = [];
+      if (useStems) {
+        [['drums', e.sd], ['bass', e.sb], ['other', e.so], ['vocals', e.sv]].forEach(([k, env]) => {
+          const ss = oc.createBufferSource(), sg = oc.createGain(); ss.buffer = sl.stems[k]; ss.playbackRate.value = rr;
+          ss.connect(sg); sg.connect(trim); env.apply(sg.gain, w0); stemSrcs.push(ss);
+        });
+      } else src.connect(trim);
+      if (false) src.connect(trim); trim.connect(low); low.connect(lp); lp.connect(hp); fader.connect(fiG); fiG.connect(foG); foG.connect(bus);
       if (it.outStyle === 'phaser') {
         const dry = oc.createGain(), wet = oc.createGain(), lfo = oc.createOscillator(), depth = oc.createGain();
         lfo.frequency.value = plan.master / 60 / 2; depth.gain.value = 650; lfo.connect(depth);
@@ -1077,7 +1101,7 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
         }
       }
       const to2 = Math.min(to, cut);
-      if (to2 > from2) src.start(from2 - w0, off(from2), (to2 - from2) * rr);
+      if (to2 > from2) { if (stemSrcs.length) stemSrcs.forEach(ss => ss.start(from2 - w0, off(from2), (to2 - from2) * rr)); else src.start(from2 - w0, off(from2), (to2 - from2) * rr); }
       return oc.startRendering();
     } });
   });
@@ -1275,7 +1299,7 @@ function addMixFx(oc, comp, plan, w0, w1) {
 }
 const sliceCache = new Map();
 async function getSlice(it) {
-  const t = it.t, tw = t.tweak || 0, key = [it.s.toFixed(4), it.d.toFixed(4), effBpm(t), (it.post || 0).toFixed(3), t.vocalOnly ? 'v' : '', tw.toFixed(3)].join('|');
+  const t = it.t, tw = t.tweak || 0, key = [it.s.toFixed(4), it.d.toFixed(4), effBpm(t), (it.post || 0).toFixed(3), t.vocalOnly ? 'v' : '', tw.toFixed(3), t.stems ? t.stems.i0 + ':' + t.stems.n : ''].join('|');
   const ck = t.id + '#' + key; if (sliceCache.has(ck)) { const v = sliceCache.get(ck); sliceCache.delete(ck); sliceCache.set(ck, v); return v; }
   const buf = await getBuffer(t), sr = buf.sampleRate;
   const pre = Math.min(0.06 + Math.max(0, -tw), it.s);
@@ -1288,7 +1312,8 @@ async function getSlice(it) {
   const rms = Math.sqrt(s / Math.max(1, cnt));
   const val = { buf: out, trim: rms > 1e-4 ? clamp(0.16 / rms, 0.3, 3) : 1, pre, phase: 0, k: 1 };
   { const bt = 60 / effBpm(t), rp = refinePhase(out, pre + ((t.downbeat - it.s) % bt + bt) % bt, bt); val.phase = rp.ph; val.k = rp.k; }
-  if (t.vocalOnly) { setStatus('Isolating the vocals of ' + t.name + '…'); await isolateVocals(out); setStatus(''); }
+  if (t.stems && stemsCover(it)) { val.stems = stemSlices(t, i0, n, out); if (t.vocalOnly) for (let ch = 0; ch < 2; ch++) out.getChannelData(ch).set(val.stems.vocals.getChannelData(ch)); }
+  if (t.vocalOnly && !val.stems) { setStatus('Isolating the vocals of ' + t.name + '…'); await isolateVocals(out); setStatus(''); }
   sliceCache.set(ck, val);
   { let n = 0; sliceCache.forEach(v => { n += v.buf.length * 8; }); for (const k of sliceCache.keys()) { if (n <= S.device.sliceBudget || sliceCache.size <= 1) break; n -= sliceCache.get(k).buf.length * 8; sliceCache.delete(k); } }
   return val;
@@ -1709,7 +1734,7 @@ function trackHTML(t, i) {
   if (ready(t)) {
     h += '<div class="chips"><label class="bpmbox">BPM <input type="number" min="40" max="250" step="0.01" data-field="bpm" value="' + Number(t.bpm.toFixed(2)) + '"></label>' +
       '<button class="btn mini" data-act="x2" title="Double the detected tempo">×2</button><button class="btn mini" data-act="half" title="Halve the detected tempo">½</button>' +
-      syncChip(t) + keyChip(t) + rateChip(t) + volHTML(t) + '<button class="btn mini" data-act="vox" aria-pressed="' + !!t.vocalOnly + '" title="Remove the instruments and keep only the vocals (approximate)">' + (t.vocalOnly ? 'Vocals only ✓' : 'Vocals only') + '</button></div>' +
+      syncChip(t) + keyChip(t) + rateChip(t) + volHTML(t) + (stemsSupported() ? '<button class="btn mini" data-act="stems" aria-pressed="' + !!(t.stems && stemsFresh(t)) + '" title="Split this song into drums, bass, instruments and vocals with AI (takes a while, runs on this computer)">' + stemLabel(t) + '</button>' : '') + '<button class="btn mini" data-act="vox" aria-pressed="' + !!t.vocalOnly + '" title="Remove the instruments and keep only the vocals (approximate)">' + (t.vocalOnly ? 'Vocals only ✓' : 'Vocals only') + '</button></div>' +
       '<canvas class="wave" data-id="' + t.id + '" aria-label="Waveform. Drag the highlighted section to move it, drag its edges to resize, or tap elsewhere to move it there."></canvas>' +
       '<div class="secrow"><span class="secinfo">' + secInfo(t) + '</span>' +
       '<button class="btn mini" data-act="nudgeL" title="Shift the section 10 ms earlier to tighten beat alignment">−10 ms</button>' +
@@ -2333,6 +2358,7 @@ function updateSelTools() {
     const sh = t.mixShift || 0;
     box.innerHTML = '<span class="selname">' + esc(t.name) + (sh ? ', ' + shiftLabel(sh, plan.beat) : '') + '</span>' +
       '<button class="btn mini" data-st="reset"' + (sh || t.fine || Math.abs(startOff(t)) > 0.0005 ? '' : ' disabled') + '>Original position</button>' +
+      (stemsSupported() ? '<button class="btn mini" data-st="stems">' + stemLabel(t) + '</button>' : '') +
       '<button class="btn mini" data-st="sync"' + (Math.abs(sh - Math.round(sh)) > 1e-6 ? '' : ' disabled') + ' title="Round the shift to the nearest whole beat so the beats line up">Sync to beat</button>' +
       (i === plan.items.length - 1 ? '<button class="btn mini" data-st="toend" aria-pressed="' + !!t.toEnd + '">' + (t.toEnd ? 'Plays to the song\'s real ending ✓' : 'Play to the song\'s real ending') + '</button>' : '') + lenBtn;
   }
@@ -2629,6 +2655,7 @@ $('#selTools').addEventListener('click', e => {
   if (b.dataset.st === 'reset') { t.mixShift = 0; t.fine = 0; t.tweak = 0; { const bt = barLen(t) / 4; setSection(t, t.downbeat + Math.round((t.secStart - t.downbeat) / bt) * bt, clampBars(t)); } setStatus('Back to its original position.'); }
   else if (b.dataset.st === 'sync') { t.mixShift = Math.round(t.mixShift || 0); setStatus('Locked to the nearest beat.'); }
   else if (b.dataset.st === 'len') { t.extStart = 0; t.extEnd = 0; t.tail = 0; setStatus('Back to its original length.'); }
+  else if (b.dataset.st === 'stems') { separateStems(t.origin || t); return; }
   else if (b.dataset.st === 'toend') t.toEnd = !t.toEnd;
   else t.fromStart = !t.fromStart;
   markDirty(); renderList();
@@ -2712,6 +2739,7 @@ list.addEventListener('click', e => {
   else if (act === 'down' && i < S.tracks.length - 1) { [S.tracks[i + 1], S.tracks[i]] = [S.tracks[i], S.tracks[i + 1]]; }
   else if (act === 'remove') { if (P.kind && P.kind.endsWith(':' + t.id)) stopPlay(); S.tracks.splice(i, 1); bufCache.delete(t.id); for (const k of [...sliceCache.keys()]) if (k.startsWith(t.id + '#')) sliceCache.delete(k); if (S.autoMaster) updateMaster(); }
   else if (act === 'x2' || act === 'half') { t.bpm = clamp(Math.round(t.bpm * (act === 'x2' ? 2 : 0.5) * 100) / 100, 40, 250); if (S.autoMaster) updateMaster(); if (!t.userSection) autoSection(t); }
+  else if (act === 'stems') { separateStems(t.origin || t); return; }
   else if (act === 'dup') { S.tracks.splice(i + 1, 0, cloneTrack(t)); }
   else if (act === 'vox') { t.vocalOnly = !t.vocalOnly; if (P.kind === 'track:' + t.id) stopPlay(); }
   else if (act === 'setstart') { if (P.kind === 'track:' + t.id) stopPlay(); t.secStart = clamp(snapTime(t, cueOf(t)), 0, Math.max(0, t.duration - clampBars(t) * barLen(t))); t.cue = t.secStart; t.userSection = true; }
@@ -3229,6 +3257,112 @@ function liveTempo(newM) {
 $('#masterSlider').addEventListener('input', e => liveTempo(+e.target.value));
 $('#masterSlider').addEventListener('change', e => setMaster(+e.target.value));
 
+/* ---------- AI stem separation (HTDemucs, runs on this device) ---------- */
+const STEM_URL = 'https://huggingface.co/StemSplitio/htdemucs-onnx/resolve/main/htdemucs_fp16weights.onnx';
+const ORT_BASE = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
+const STEM_N = 343980;
+let ortP = null, sessP = null;
+function stemsSupported() { return !(S.device && S.device.kind === 'phone') && location.protocol !== 'file:' && typeof WebAssembly === 'object'; }
+function loadOrt() {
+  if (window.ort) return Promise.resolve(window.ort);
+  if (!ortP) ortP = new Promise((res, rej) => { const s = document.createElement('script'); s.src = ORT_BASE + 'ort.webgpu.min.js'; s.crossOrigin = 'anonymous'; s.onload = () => res(window.ort); s.onerror = () => { ortP = null; rej(new Error('Could not load the stem AI engine.')); }; document.head.appendChild(s); });
+  return ortP;
+}
+async function fetchModel(onP) {
+  let cache = null; try { cache = 'caches' in window ? await caches.open('blendroom-models') : null; } catch (e) {}
+  const hit = cache ? await cache.match(STEM_URL) : null;
+  if (hit) return new Uint8Array(await hit.arrayBuffer());
+  const r = await fetch(STEM_URL, { mode: 'cors' });
+  if (!r.ok) throw new Error('The stem AI could not be downloaded (' + r.status + ').');
+  const total = +r.headers.get('content-length') || 166e6, reader = r.body.getReader(), parts = []; let got = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; parts.push(value); got += value.length; onP(Math.min(1, got / total)); }
+  const blob = new Blob(parts);
+  if (cache) { try { await cache.put(STEM_URL, new Response(blob, { headers: { 'Content-Type': 'application/octet-stream' } })); } catch (e) {} }
+  return new Uint8Array(await blob.arrayBuffer());
+}
+async function makeSession(ep) {
+  const ort = await loadOrt();
+  ort.env.wasm.wasmPaths = ORT_BASE;
+  ort.env.wasm.numThreads = window.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 4) : 1;
+  if (!S.stemBytes) S.stemBytes = await fetchModel(f => setBusy('Downloading the stem AI (166 MB, only once)', f));
+  setBusy('Starting the stem AI', null);
+  const s = await ort.InferenceSession.create(S.stemBytes, { executionProviders: [ep], graphOptimizationLevel: 'all' });
+  s._ep = ep; return s;
+}
+function getSession(forceWasm) {
+  if (sessP && !forceWasm) return sessP;
+  sessP = (async () => {
+    const eps = !forceWasm && navigator.gpu ? ['webgpu', 'wasm'] : ['wasm'];
+    let last = null;
+    for (const ep of eps) { try { return await makeSession(ep); } catch (e) { console.warn('stem engine', ep, e); last = e; } }
+    throw last || new Error('This browser cannot run the stem AI.');
+  })();
+  sessP.catch(() => { sessP = null; });
+  return sessP;
+}
+function stemRegionFor(t) { const bl = barLen(t); return [Math.max(0, t.secStart - 16 * bl), Math.min(t.duration, t.secStart + clampBars(t) * bl + 16 * bl)]; }
+function stemsFresh(t) { const st = t.stems; if (!st) return false; const bl = barLen(t), a = t.secStart - 2 * bl, b = t.secStart + clampBars(t) * bl + 2 * bl; return a >= st.a - 0.01 && b <= st.a + st.n / st.sr + 0.01; }
+function stemsCover(it) { const st = it.t.stems; if (!st) return false; const s0 = it.s - 0.07, s1 = it.s + (it.d + (it.post || 0)) * it.r + 0.07; return s0 >= st.a - 0.01 && s1 <= st.a + st.n / st.sr + 0.01; }
+function stemLabel(t) { return t.stems ? (stemsFresh(t) ? '\u{1F39B} Stems \u2713' : '\u{1F39B} Update stems') : '\u{1F39B} Stems'; }
+async function separateStems(t) {
+  if (!stemsSupported()) { setStatus('Stem separation needs a computer: it is too heavy for a phone.'); return false; }
+  if (S.stemBusy) { setStatus('Already separating stems, one track at a time.'); return false; }
+  S.stemBusy = true;
+  try {
+    await waitIdle(); clearTimeout(autoT); S.busy = true;
+    const buf = await getBuffer(t);
+    if (buf.sampleRate !== 44100) throw new Error('Stem separation needs 44.1 kHz audio.');
+    let sess = await getSession();
+    const ort = window.ort, [a, b] = stemRegionFor(t), sr = 44100, i0 = Math.round(a * sr), n = Math.max(1, Math.min(buf.length - i0, Math.round((b - a) * sr)));
+    const L = buf.getChannelData(0).subarray(i0, i0 + n), R = buf.getChannelData(Math.min(1, buf.numberOfChannels - 1)).subarray(i0, i0 + n);
+    const overlap = STEM_N >> 2, stride = STEM_N - overlap, chunks = Math.max(1, Math.ceil(n / stride));
+    const win = new Float32Array(STEM_N).fill(1); for (let k = 0; k < overlap; k++) { const f = k / (overlap - 1); win[k] = f; win[STEM_N - 1 - k] = f; }
+    const acc = [0, 1, 3].map(() => [new Float32Array(n), new Float32Array(n)]), weight = new Float32Array(n), input = new Float32Array(2 * STEM_N);
+    const t0 = performance.now();
+    for (let c = 0; c < chunks; c++) {
+      const st = c * stride, len = Math.min(STEM_N, n - st);
+      input.fill(0); input.set(L.subarray(st, st + len), 0); input.set(R.subarray(st, st + len), STEM_N);
+      let o = (await sess.run({ mix: new ort.Tensor('float32', input, [1, 2, STEM_N]) })).stems.data;
+      if (c === 0 && sess._ep === 'webgpu') { let bad = false; for (let k = 0; k < o.length; k += 997) if (!isFinite(o[k])) { bad = true; break; } if (bad) { sess = await getSession(true); o = (await sess.run({ mix: new ort.Tensor('float32', input, [1, 2, STEM_N]) })).stems.data; } }
+      [0, 1, 3].forEach((s, j) => { for (let ch = 0; ch < 2; ch++) { const base = (s * 2 + ch) * STEM_N, dst = acc[j][ch]; for (let k = 0; k < len; k++) dst[st + k] += o[base + k] * win[k]; } });
+      for (let k = 0; k < len; k++) weight[st + k] += win[k];
+      const el = (performance.now() - t0) / 1000, left = el / (c + 1) * (chunks - c - 1);
+      setBusy('Separating stems of ' + t.name + (c ? ', about ' + Math.max(1, Math.round(left)) + ' s left' : ''), (c + 1) / chunks);
+      await sleep(0);
+    }
+    const toI16 = f => { const out = new Int16Array(n); for (let k = 0; k < n; k++) { const v = f[k] / Math.max(weight[k], 1e-8); out[k] = v >= 1 ? 32767 : v <= -1 ? -32768 : Math.round(v * 32767); } return out; };
+    t.stems = { a: i0 / sr, i0, n, sr, d: acc[0].map(toI16), b: acc[1].map(toI16), v: acc[2].map(toI16), ep: sess._ep };
+    S.tracks.forEach(x => { if (x.origin === t || x === t.origin || (x.origin && x.origin === t.origin)) x.stems = t.stems; });
+    for (const k of [...sliceCache.keys()]) if (k.startsWith(t.id + '#')) sliceCache.delete(k);
+    S.busy = false; clearBusy();
+    setStatus('Stems ready for ' + t.name + ' (' + (sess._ep === 'webgpu' ? 'graphics card' : 'processor') + '). Stem swap transitions can now use them.');
+    markDirty(); renderList();
+    return true;
+  } catch (e) {
+    console.error(e); S.busy = false; clearBusy(); setStatus('Stem separation failed: ' + ((e && e.message) || e));
+    return false;
+  } finally { S.stemBusy = false; S.busy = false; }
+}
+async function separateAllStems() {
+  const list = S.tracks.filter(t => ready(t) && !t.origin && !stemsFresh(t));
+  if (!list.length) { setStatus('All tracks already have stems.'); return; }
+  for (const t of list) if (!(await separateStems(t))) break;
+}
+function stemSlices(t, i0, n, mix) {
+  const st = t.stems, sr = st.sr, off = i0 - st.i0, mk = () => ac().createBuffer(2, n, sr), res = { drums: mk(), bass: mk(), vocals: mk(), other: mk() };
+  const src = { drums: st.d, bass: st.b, vocals: st.v };
+  for (let ch = 0; ch < 2; ch++) {
+    const m = mix.getChannelData(ch), o = res.other.getChannelData(ch); o.set(m);
+    for (const k of ['drums', 'bass', 'vocals']) {
+      const d = res[k].getChannelData(ch), s = src[k][ch];
+      for (let i = 0; i < n; i++) { const j = off + i, v = j >= 0 && j < st.n ? s[j] / 32767 : 0; d[i] = v; o[i] -= v; }
+    }
+  }
+  return res;
+}
+
+$('#stemsAll').addEventListener('click', separateAllStems);
+setTimeout(() => { if (!stemsSupported()) $('#stemsAll').hidden = true; }, 0);
 function setTab(name) {
   S.tab = name;
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
