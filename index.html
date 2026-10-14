@@ -464,7 +464,8 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
         <span class="grow"></span>
         <button class="btn" id="syncAll" title="Snap everything back onto the beat grid">Sync all to beat</button>
         <button class="btn" id="fixVocals" title="Stop two vocals playing at once">Check vocal clashes</button>
-        <button class="btn" id="autoLevel" title="Match the loudness of every section">Auto-level</button>
+        <button class="btn ftog" id="autoLevel" aria-pressed="true" title="Match the loudness of every song automatically">Auto-level: On</button>
+        <button class="btn ftog" id="autoFades" aria-pressed="true" title="Fade the old song out and the new one in over every smooth transition">Auto fades: On</button>
       </div>
       <div class="touchbar" id="touchBar" hidden aria-label="Touch controls">
         <button class="btn" data-tk="n" title="Start the next song's section here">⤓ Next here</button>
@@ -562,7 +563,7 @@ const STYLE_HELP = {
   cut: 'Switches instantly on the first downbeat of the next section. Best into a big drop.'
 };
 
-const S = { tracks: [], master: 124, autoMaster: true, phrase: 8, dragSnap: 'beat', extMode: 'push', targetMin: 5, allowRepeats: true, aiFromStart: true, aiToEnd: true, aiArc: true, aiFx: true, fxIntro: false, fxOutro: true, fadeUnit: 'bar', transBars: 8, style: 'ai', sectionBars: 32, snap: true, mix: null, mixDirty: false, mixPos: 0, busy: false };
+const S = { tracks: [], master: 124, autoMaster: true, phrase: 8, dragSnap: 'beat', extMode: 'push', targetMin: 5, allowRepeats: true, aiFromStart: true, aiToEnd: true, aiArc: true, aiFx: true, fxIntro: false, fxOutro: true, fadeUnit: 'bar', transBars: 8, autoLevel: true, autoFades: true, style: 'ai', sectionBars: 32, snap: true, mix: null, mixDirty: false, mixPos: 0, busy: false };
 let uid = 0;
 
 /* ---------- audio context & buffers ---------- */
@@ -825,6 +826,7 @@ function camelotDist(a, b) {
 
 /* ---------- plan ---------- */
 function computePlan() {
+  autoMatchLevels();
   const m = S.master, mb = 240 / m, beat = 60 / m;
   const items = S.tracks.filter(ready).map(t => ({ t, id: t.id, r: rate(t), bl: barLen(t), bars: clampBars(t), inBars: 0, outBars: 0, outStyle: null }));
   let prevStyle = null;
@@ -1031,8 +1033,16 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
   const last = items.length - 1;
   if (envs[last]) { const it = items[last], f = it.t.toEnd ? Math.min(0.4, it.d / 2) : Math.min(8 * mb, it.d / 2), b = it.start + it.d; fadeOut(envs[last].fader, b - f, b); }
   items.forEach((it, i) => { if (envs[i] && it.endOut != null && it.start + it.len < it.endOut - 0.01) { const b = it.start + it.len; fadeOut(envs[i].fo, b - 0.03, b); } });
-  items.forEach((it, i) => { const fs = Math.min(fadeSec(fadeOn(it.t, 'out') ? it.t.fadeOut : 0, it.t.fadeOutU, mb), it.len); if (envs[i] && fs > 0) { const b = it.start + it.len; fadeOut(envs[i].fo, b - fs, b); } });
-  items.forEach((it, i) => { const fs = Math.min(fadeSec(fadeOn(it.t, 'in') ? it.t.fadeIn : 0, it.t.fadeInU, mb), it.len); if (envs[i] && fs > 0) fadeIn(envs[i].fi, it.start, it.start + fs); });
+  const PUNCHY = ['cut', 'backspin', 'echocut', 'echo', 'beatdrop'];
+  items.forEach((it, i) => {
+    let fs = it.t.fadeOutOn == null && S.autoFades ? (i < items.length - 1 && it.outBars && !PUNCHY.includes(it.outStyle) ? it.outBars * mb / 2 : 0) : fadeSec(fadeOn(it.t, 'out') ? it.t.fadeOut : 0, it.t.fadeOutU, mb);
+    fs = Math.min(fs, it.len); if (envs[i] && fs > 0) { const b = it.start + it.len; fadeOut(envs[i].fo, b - fs, b); }
+  });
+  items.forEach((it, i) => {
+    const pv = i > 0 ? items[i - 1] : null;
+    let fs = it.t.fadeInOn == null && S.autoFades ? (pv && pv.outBars && !PUNCHY.includes(pv.outStyle) ? (it.inBars || pv.outBars) * mb / 2 : 0) : fadeSec(fadeOn(it.t, 'in') ? it.t.fadeIn : 0, it.t.fadeInU, mb);
+    fs = Math.min(fs, it.len); if (envs[i] && fs > 0) fadeIn(envs[i].fi, it.start, it.start + fs);
+  });
   const jobs = [];
   items.forEach((it, i) => {
     const sl = slices[i]; if (!sl) return;
@@ -2534,10 +2544,17 @@ function sectionLoud(t) {
   return 10 * Math.log10(Math.max(1e-10, s / Math.max(1, c)));
 }
 function setGain(t, db) {
+  t.gainManual = true;
   t.gainDb = clamp(Math.round(db * 2) / 2, -12, 12);
   const li = document.querySelector('.track[data-id="' + t.id + '"]');
   if (li) { const inp = li.querySelector('input[data-field="gain"]'), out = li.querySelector('.vol output'); if (inp && +inp.value !== t.gainDb) inp.value = t.gainDb; if (out) out.textContent = fmtDb(t.gainDb); }
   drawMix(P.kind === 'mix' ? pos() : S.mixPos);
+}
+function autoMatchLevels() {
+  if (!S.autoLevel) return;
+  const rd = S.tracks.filter(t => ready(t) && t.rms); if (rd.length < 2) return;
+  const L = rd.map(sectionLoud), sorted = [...L].sort((a, b) => a - b), target = sorted[Math.floor((sorted.length - 1) / 2)];
+  rd.forEach((t, i) => { if (!t.gainManual) t.gainDb = clamp(Math.round((target - L[i]) * 2) / 2, -12, 12); });
 }
 function autoLevel() {
   const rd = S.tracks.filter(ready); if (!rd.length) return;
@@ -2597,8 +2614,8 @@ function renderTPop() {
   $('#tpopLoopWrap').hidden = !(a.outStyle === 'loop' || a.outStyle === 'loopin') || a.ai;
   $('#tpopFadeIn').innerHTML = fadeBtns(b.t, 'in');
   { const fo = fadeOn(t, 'out'), fi = fadeOn(b.t, 'in');
-    $('#tpopFoTog').setAttribute('aria-pressed', String(fo)); $('#tpopFoTog').textContent = 'Fade out old song: ' + (fo ? 'On' : 'Off');
-    $('#tpopFiTog').setAttribute('aria-pressed', String(fi)); $('#tpopFiTog').textContent = 'Fade in new song: ' + (fi ? 'On' : 'Off');
+    $('#tpopFoTog').setAttribute('aria-pressed', String(fo)); $('#tpopFoTog').textContent = 'Fade out old song: ' + (t.fadeOutOn == null && S.autoFades ? 'Auto' : fo ? 'On' : 'Off');
+    $('#tpopFiTog').setAttribute('aria-pressed', String(fi)); $('#tpopFiTog').textContent = 'Fade in new song: ' + (b.t.fadeInOn == null && S.autoFades ? 'Auto' : fi ? 'On' : 'Off');
     $('#tpopFade').hidden = !fo; $('#tpopFadeIn').hidden = !fi; }
   document.querySelectorAll('.funit').forEach(s => { s.textContent = S.fadeUnit === 'sec' ? '(seconds)' : '(bars)'; });
   $('#tpopAI').hidden = !a.ai;
@@ -2733,7 +2750,22 @@ $('#mixcv').addEventListener('pointermove', e => {
 });
 const mixUp = () => { if (mixFxDrag) { const m = mixFxDrag; mixFxDrag = null; if (m.moved) { markDirty(); renderFxPanel(); } return; } if (mixEdge) { mixEdge = null; planCache.items.forEach(it => { it.t.extEnd = floorBeats(it.extE / planCache.beat); it.t.extStart = floorBeats(it.extS / planCache.beat); if (it.tailS != null) it.t.tail = Math.max(0, floorBeats(it.tailS / planCache.beat)); }); markDirty(); renderList(); return; } if (mixShift) { const m = mixShift; mixShift = null; if (m.moved) { mixDragged = true; markDirty(); renderList(); } return; } if (mixFade) { mixFade = null; markDirty(); renderList(); return; } if (!mixDrag) return; mixDrag = null; if (mixDragged) markDirty(); else mixDragged = true; };
 $('#mixcv').addEventListener('pointerup', mixUp); $('#mixcv').addEventListener('pointercancel', mixUp);
-$('#autoLevel').addEventListener('click', autoLevel);
+$('#autoLevel').addEventListener('click', () => {
+  S.autoLevel = !S.autoLevel;
+  if (S.autoLevel) { S.tracks.forEach(t => { t.gainManual = false; }); autoMatchLevels(); }
+  updateSmoothBtns(); markDirty(); renderList();
+  setStatus(S.autoLevel ? 'Auto-level is on: every song plays at the same loudness. Songs whose volume you change by hand keep your setting.' : 'Auto-level is off: song volumes stay as they are.');
+});
+$('#autoFades').addEventListener('click', () => {
+  S.autoFades = !S.autoFades; updateSmoothBtns(); markDirty(); renderList();
+  setStatus(S.autoFades ? 'Auto fades are on: the old song fades out and the new one fades in over each smooth transition.' : 'Auto fades are off: only the transition style itself shapes the volume.');
+});
+function updateSmoothBtns() {
+  const a = $('#autoLevel'), f = $('#autoFades');
+  if (a) { a.setAttribute('aria-pressed', String(S.autoLevel)); a.textContent = 'Auto-level: ' + (S.autoLevel ? 'On' : 'Off'); }
+  if (f) { f.setAttribute('aria-pressed', String(S.autoFades)); f.textContent = 'Auto fades: ' + (S.autoFades ? 'On' : 'Off'); }
+}
+updateSmoothBtns();
 $('#setlist').addEventListener('input', e => { const el = e.target; if (el.dataset.field !== 'gain') return; const t = S.tracks.find(x => x.id === el.closest('.track').dataset.id); if (t) { setGain(t, +el.value); markDirty(); } });
 $('#mixcv').addEventListener('click', e => {
   if (mixDragged) { mixDragged = false; return; }
