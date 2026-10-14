@@ -441,6 +441,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
         </div>
         <div class="tgroup"><span class="tl">Transition</span>
           <select id="style" aria-label="Default transition style"></select>
+          <button class="btn mini" id="mixAgain" title="Let the AI build a completely new mix from the same songs">🎲 Again</button>
           <div class="seg" id="transBars" role="group" aria-label="Default transition length in bars"><button data-v="1">1</button><button data-v="2">2</button><button data-v="4">4</button><button data-v="8">8</button><button data-v="16">16</button></div>
         </div>
         <div class="tgroup"><span class="tl">Snap</span>
@@ -491,7 +492,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
             <span class="lbl">Effects</span>
             <div class="frow"><button class="btn mini ftog" id="tpopRiser" aria-pressed="false">Riser: Off</button><button class="btn mini ftog" id="tpopImpact" aria-pressed="false">Impact: Off</button></div>
             <p class="help" id="tpopInfo"></p>
-            <div class="frow"><button class="btn primary" id="tpopPrev" data-play="" data-label="Preview transition">Preview transition</button><button class="btn" id="tpopAI" hidden>Another AI idea</button></div>
+            <div class="frow"><button class="btn primary" id="tpopPrev" data-play="" data-label="Preview transition">Preview transition</button><button class="btn" id="tpopAI" title="Let the AI pick a different transition here">🎲 Other</button></div>
           </div>
         </aside>
       </div>
@@ -513,7 +514,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
         <label class="opt"><input type="checkbox" id="fxOutro" checked><span>Crowd outro</span></label>
       </div>
       <div class="tgroup manorder"><span class="tl">Order for Manual sections</span><div class="seg" id="aiManOrder" role="group" aria-label="Track order when using the Manual sections"><button data-v="arc" aria-pressed="true">AI energy arc</button><button data-v="keep" aria-pressed="false">Keep my order</button><button data-v="random" aria-pressed="false">Random</button></div></div>
-      <div class="cta-row"><button class="btn primary big" id="aiBuild">✦ Build my mix</button><button class="btn big" id="aiManual" title="Keep the sections from the Manual tab; the AI picks the order, transitions and effects">✦ AI mix with my Manual sections</button><button class="btn big" id="aiUndo" hidden>Undo</button></div>
+      <div class="cta-row"><button class="btn primary big" id="aiBuild">✦ Build my mix</button><button class="btn big" id="aiAgain" title="Build a completely different mix from the same songs">🎲 Again</button><button class="btn big" id="aiManual" title="Keep the sections from the Manual tab; the AI picks the order, transitions and effects">✦ AI mix with my Manual sections</button><button class="btn big" id="aiUndo" hidden>Undo</button></div>
       <p id="designStatus" role="status" aria-live="polite"></p>
     </div>
   </section>
@@ -834,7 +835,7 @@ function computePlan() {
     const a = items[i], b = items[i + 1];
     const chosen = a.t.trans === 'default' ? S.style : a.t.trans;
     let style = chosen, want = transLenOf(a.t), loopB = loopBeatsOf(a.t), why = '';
-    if (chosen === 'ai') { const p = aiPick(a, b, i, prevStyle); style = p.style; if (!(a.t.transLen && a.t.transLen !== 'default')) want = p.bars; if (p.loop != null) loopB = p.loop; why = p.why; }
+    if (chosen === 'ai') { const p = aiPick(a, b, i, prevStyle); style = p.style; const cap = { cut: 1, backspin: 2, echo: 4 }[style]; want = cap ? Math.min(want, cap, p.bars > cap ? cap : Math.max(p.bars, 1)) : want; if (p.loop != null) loopB = p.loop; why = p.why; }
     const tb = Math.max(0, Math.min(want, a.bars, Math.floor(b.t.secStart / b.bl + 1e-6)));
     a.outBars = tb; b.inBars = tb; a.outStyle = style; a.loopB = loopB; a.ai = chosen === 'ai'; a.why = why; prevStyle = style;
   }
@@ -1938,7 +1939,8 @@ function restoreMix(snap) {
   S.tracks = snap.tracks; S.master = snap.master; S.autoMaster = snap.autoMaster;
 }
 async function waitIdle() { if (!S.busy) return; clearTimeout(autoT); while (S.busy) await sleep(80); }
-async function aiBuildMix() {
+async function aiBuildMix(opts) {
+  const VR = opts && opts.again ? rng((Date.now() % 1000000007) >>> 0) : null;
   if (S.aiRunning) return; await waitIdle();
   if (!S.tracks.filter(t => ready(t) && !t.origin).length) { setDesignStatus('Add and analyze at least one track first.'); return; }
   S.busy = true; try { await ensureDeepAll(S.tracks); } finally { S.busy = false; }
@@ -1946,14 +1948,15 @@ async function aiBuildMix() {
   stopPlay(); if (S.tsel) closeTPop();
   aiUndo = snapshotMix();
   const target = S.targetMin * 60, P = S.phrase, notReady = S.tracks.filter(t => !ready(t));
-  let pool = origins.slice(), cur = pool.reduce((p, t) => t.bpm < p.bpm ? t : p);
+  let pool = origins.slice(), cur = VR ? pool[Math.floor(VR() * pool.length)] : pool.reduce((p, t) => t.bpm < p.bpm ? t : p);
   const order = [cur]; pool = pool.filter(t => t !== cur);
   while (pool.length) {
     let best = null, bc = Infinity;
-    for (const t of pool) { const c = camelotDist(cur.key, t.key) + Math.abs(t.bpm - cur.bpm) / 4; if (c < bc) { bc = c; best = t; } }
+    for (const t of pool) { const c = camelotDist(cur.key, t.key) + Math.abs(t.bpm - cur.bpm) / 4 + (VR ? VR() * 2.5 : 0); if (c < bc) { bc = c; best = t; } }
     order.push(best); pool = pool.filter(t => t !== best); cur = best;
   }
   S.autoMaster = true; S.tracks = order.concat(notReady); updateMaster();
+  if (VR) order.forEach(t => { t.aiSeed = 1 + Math.floor(VR() * 1e6); });
   let mb = 240 / S.master, ov = 2 * mb; const minB = Math.max(P, 16);
   const hookScore = t => hookWindow(t, 16, { vocal: true }).sc;
   let use = order.slice();
@@ -1962,7 +1965,7 @@ async function aiBuildMix() {
   if (S.aiArc && use.length >= 3) {
     const n = use.length, arc = i => { const x = i / (n - 1); return x < 0.7 ? 0.2 + 0.8 * (x / 0.7) : 1 - 0.85 * ((x - 0.7) / 0.3); };
     const en = t => { const r = t.rms; let s = 0; for (let i = 0; i < r.length; i++) s += r[i] * r[i]; return Math.sqrt(s / Math.max(1, r.length)) * (1 + 0.004 * (t.bpm - 120)); };
-    const posOrder = [...Array(n).keys()].sort((a, b) => arc(a) - arc(b)), trOrder = use.slice().sort((a, b) => en(a) - en(b)), arr = new Array(n);
+    const posOrder = [...Array(n).keys()].sort((a, b) => arc(a) - arc(b)), nz = new Map(use.map(t => [t, VR ? 1 + (VR() - 0.5) * 0.45 : 1])), trOrder = use.slice().sort((a, b) => en(a) * nz.get(a) - en(b) * nz.get(b)), arr = new Array(n);
     posOrder.forEach((p, j) => { arr[p] = trOrder[j]; });
     const kc = (x, y) => x && y ? camelotDist(x.key, y.key) : 0;
     for (let pass = 0; pass < 3; pass++) for (let i = 0; i < n - 1; i++) {
@@ -2618,7 +2621,7 @@ function renderTPop() {
     $('#tpopFiTog').setAttribute('aria-pressed', String(fi)); $('#tpopFiTog').textContent = 'Fade in new song: ' + (b.t.fadeInOn == null && S.autoFades ? 'Auto' : fi ? 'On' : 'Off');
     $('#tpopFade').hidden = !fo; $('#tpopFadeIn').hidden = !fi; }
   document.querySelectorAll('.funit').forEach(s => { s.textContent = S.fadeUnit === 'sec' ? '(seconds)' : '(bars)'; });
-  $('#tpopAI').hidden = !a.ai;
+  $('#tpopAI').hidden = false;
   $('#tpopRiser').setAttribute('aria-pressed', String(!!t.fxRiser)); $('#tpopRiser').textContent = 'Riser before the hand-over: ' + (t.fxRiser ? 'On' : 'Off');
   $('#tpopImpact').setAttribute('aria-pressed', String(!!t.fxImpact)); $('#tpopImpact').textContent = 'Impact on the hand-over: ' + (t.fxImpact ? 'On' : 'Off');
   $('#tpopFade').innerHTML = fadeBtns(t, 'out');
@@ -2644,7 +2647,15 @@ function tsel() { return S.tracks.find(x => x.id === S.tsel); }
 $('#tpopStyle').addEventListener('click', e => { const b = e.target.closest('button'), t = tsel(); if (!b || !t) return; t.trans = b.dataset.v; markDirty(); renderList(); });
 $('#tpopLen').addEventListener('click', e => { const b = e.target.closest('button'), t = tsel(); if (!b || !t) return; t.transLen = b.dataset.v === 'default' ? 'default' : +b.dataset.v; markDirty(); renderList(); });
 $('#tpopLoop').addEventListener('click', e => { const b = e.target.closest('button'), t = tsel(); if (!b || !t) return; t.loopBeats = b.dataset.v === 'roll' ? 'roll' : +b.dataset.v; markDirty(); renderList(); });
-$('#tpopAI').addEventListener('click', () => { const t = tsel(); if (!t) return; t.aiSeed = (t.aiSeed || 1) + 1; markDirty(); renderList(); });
+$('#tpopAI').addEventListener('click', () => {
+  const t = tsel(); if (!t) return;
+  if (!(t.trans === 'ai' || (t.trans === 'default' && S.style === 'ai'))) t.trans = 'ai';
+  const pl0 = computePlan(), i0 = pl0.items.findIndex(x => x.t === t), was = i0 >= 0 ? pl0.items[i0].outStyle : null;
+  for (let k = 0; k < 12; k++) { t.aiSeed = (t.aiSeed || 1) + 1 + Math.floor(Math.random() * 97); const pl = computePlan(), it = pl.items[i0]; if (!it || it.outStyle !== was) break; }
+  markDirty(); renderList();
+  const it = computePlan().items[i0]; if (it) setStatus('Other idea: ' + STYLES[it.outStyle] + ', ' + it.outBars + (it.outBars === 1 ? ' bar' : ' bars') + '. Press Other again for another one.');
+  if (S.tsel) { const ch = (planCache && mixChips || []).find(c => c.id === S.tsel); if (ch) openTPop(ch); }
+});
 $('#tpopFade').addEventListener('click', e => { const b = e.target.closest('button'), t = tsel(); if (!b || !t) return; setFade(t, 'out', +b.dataset.v); markDirty(); renderList(); });
 $('#tpopFadeIn').addEventListener('click', e => {
   const btn = e.target.closest('button'); if (!btn || !planCache) return;
@@ -2655,7 +2666,9 @@ $('#snapSeg').addEventListener('click', e => { const b = e.target.closest('butto
 $('#syncAll').addEventListener('click', syncAll);
 $('#targetLen').addEventListener('input', e => { S.targetMin = +e.target.value; $('#targetOut').textContent = fmt(S.targetMin * 60); });
 $('#allowRep').addEventListener('change', e => { S.allowRepeats = e.target.checked; });
-$('#aiBuild').addEventListener('click', aiBuildMix);
+$('#aiBuild').addEventListener('click', () => aiBuildMix());
+$('#aiAgain').addEventListener('click', () => aiBuildMix({ again: true }));
+$('#mixAgain').addEventListener('click', () => aiBuildMix({ again: true }));
 $('#aiManual').addEventListener('click', aiFromManual);
 $('#aiManOrder').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.aiManOrder = b.dataset.v; document.querySelectorAll('#aiManOrder button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); });
 ['aiFromStart', 'aiToEnd', 'aiArc', 'aiFx'].forEach(k => $('#' + k).addEventListener('change', e => { S[k] = e.target.checked; }));
