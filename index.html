@@ -457,6 +457,7 @@ kbd{font:600 12px/1 'Figtree',sans-serif;border:1px solid var(--line);border-bot
           <button class="btn mini" id="enhUndo" hidden title="Back to the original sound">↺ Undo</button>
         </div>
         <div class="tgroup"><span class="tl">Effects</span>
+          <button class="btn mini" id="teasers" title="Put short vocal hooks of the next song over instrumental parts before the transitions">✨ Vocal teasers</button>
           <select id="fxAdd" aria-label="Add an effect at the play position"><option value="">＋ Add effect…</option><option value="impact">Impact (I)</option><option value="riser">Riser</option><option value="down">Downlifter</option><option value="crowd">Crowd cheer</option><option value="snippet">Snippet / repeat of a track</option><option value="sample">Your own sample…</option></select>
           <input type="file" id="fxFile" accept="audio/*" hidden>
         </div>
@@ -541,7 +542,7 @@ const fmt = s => { if (!isFinite(s)) return '–'; s = Math.max(0, s); return Ma
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-const STYLES = { ai: 'AI DJ (surprise me)', stemswap: 'Stem swap (AI stems)', loopin: 'Loop in (next track)', bassswap: 'Bass swap', beatdrop: 'Beat drop', blend: 'Smooth blend', filter: 'Filter sweep', phaser: 'Phaser', loop: 'Loop repeat', backspin: 'Backspin', echo: 'Echo out', cut: 'Hard cut' };
+const STYLES = { ai: 'AI DJ (surprise me)', echocut: 'Echo out & drop (vocal safe)', stemswap: 'Stem swap (AI stems)', loopin: 'Loop in (next track)', bassswap: 'Bass swap', beatdrop: 'Beat drop', blend: 'Smooth blend', filter: 'Filter sweep', phaser: 'Phaser', loop: 'Loop repeat', backspin: 'Backspin', echo: 'Echo out', cut: 'Hard cut' };
 const LOOPS = [['0.25', '¼ beat'], ['0.5', '½ beat'], ['1', '1 beat'], ['2', '2 beats'], ['4', '1 bar'], ['roll', 'Roll (1 → ¼ beat)']];
 const loopBeatsOf = t => t.loopBeats == null ? 1 : t.loopBeats;
 const loopLabel = t => (LOOPS.find(([k]) => k === String(loopBeatsOf(t))) || LOOPS[2])[1];
@@ -552,6 +553,7 @@ const STYLE_HELP = {
   ai: 'Picks a different move for every transition, the way a pro DJ reads the set: it checks whether the keys fit and whether the energy rises or falls, avoids repeating itself, and now and then throws in a surprise.',
   beatdrop: 'The beat drains out of the outgoing track while the next track kicks in with only its drums and bass. Then the old instruments fade away as the new track opens up.',
   stemswap: 'Uses AI-separated stems like a DJ on stem decks: the old vocals leave first, the new drums come in, the instruments cross over, then the bass swaps on the one and the new vocals land last. Needs stems for both songs; otherwise it plays as a bass swap.',
+  echocut: 'The old song plays on, then echoes out on the last beat while the new song drops in on the one. The two vocals never overlap.',
   loopin: 'The next track enters as a repeating loop of its first beats, opening up as it builds, then drops in on the first beat of its section.',
   loop: 'The outgoing track grabs its last few beats and repeats them as a loop while the next track rises underneath. Choose the loop length per transition, or a roll that tightens from 1 beat to ¼ beat.',
   backspin: 'The outgoing track spins backwards like a pulled-back record and stops, and the next track drops in exactly on the first beat of its phrase.',
@@ -560,7 +562,7 @@ const STYLE_HELP = {
   cut: 'Switches instantly on the first downbeat of the next section. Best into a big drop.'
 };
 
-const S = { tracks: [], master: 124, autoMaster: true, phrase: 8, dragSnap: 'beat', extMode: 'push', targetMin: 5, allowRepeats: true, aiFromStart: true, aiToEnd: true, aiArc: true, aiFx: true, fxIntro: false, fxOutro: true, fadeUnit: 'bar', transBars: 2, style: 'bassswap', sectionBars: 32, snap: true, mix: null, mixDirty: false, mixPos: 0, busy: false };
+const S = { tracks: [], master: 124, autoMaster: true, phrase: 8, dragSnap: 'beat', extMode: 'push', targetMin: 5, allowRepeats: true, aiFromStart: true, aiToEnd: true, aiArc: true, aiFx: true, fxIntro: false, fxOutro: true, fadeUnit: 'bar', transBars: 8, style: 'ai', sectionBars: 32, snap: true, mix: null, mixDirty: false, mixPos: 0, busy: false };
 let uid = 0;
 
 /* ---------- audio context & buffers ---------- */
@@ -862,7 +864,8 @@ function computePlan() {
     const sa0 = A.s + (A.tauOut - A.start) * A.r, sa1 = A.s + (A.endOut - A.start) * A.r, sb1 = B.s + (A.endOut - B.start) * B.r;
     A.vocA = vocalIn(A.t, sa0, sa1); A.vocB = vocalIn(B.t, B.s, sb1); A.quietA = quietRatio(A.t, sa0, sa1);
     if (A.outStyle === 'stemswap' && !(stemsCover(A) && stemsCover(B))) { A.outStyle = 'bassswap'; A.stemFallback = true; }
-    A.clash = A.endOut - A.tauOut > 0.05 && A.vocA > 0.35 && A.vocB > 0.35 && !['cut', 'backspin', 'stemswap'].includes(A.outStyle);
+    A.clash = A.endOut - A.tauOut > 0.05 && A.vocA > 0.35 && A.vocB > 0.35 && !['cut', 'backspin', 'stemswap', 'echocut'].includes(A.outStyle);
+    if (A.clash && A.ai) { const st = typeof stemsCover === 'function' && stemsCover(A) && stemsCover(B); A.outStyle = st ? 'stemswap' : 'echocut'; A.clash = false; A.why = (A.why ? A.why + '; ' : '') + (st ? 'the vocals would clash, so the stems hand them over one by one' : 'the vocals would clash, so the old vocal echoes out before the new one starts'); }
   }
   items.forEach(it => { it.len = it.d + it.post; });
   const total = items.reduce((m, it) => Math.max(m, it.start + it.len), 0) + (S.fxOutro && items.length ? 4 : 0);
@@ -885,8 +888,8 @@ function aiPick(a, b, i, prev) {
   if (b.t.arcPhase === 'peak' && a.t.arcPhase !== 'peak') { w.loop *= 1.8; w.cut *= 1.6; w.backspin *= 1.4; w.beatdrop *= 1.3; why.push('the set is heading into its climax'); }
   else if (b.t.arcPhase === 'outro' || b.t.arcPhase === 'down') { w.blend *= 2; w.filter *= 1.6; w.echo *= 1.3; w.cut *= 0.3; w.backspin *= 0.3; why.push('the set is winding down, so it keeps it smooth'); }
   else if (a.t.arcPhase === 'intro') { w.blend *= 1.6; w.bassswap *= 1.4; w.cut *= 0.5; why.push('it is still the intro, so it builds gently'); }
-  const za0 = a.t.secStart + Math.max(0, a.bars - 4) * a.bl, za1 = a.t.secStart + a.bars * a.bl;
-  const vA = vocalIn(a.t, za0, za1), vB = vocalIn(b.t, Math.max(0, b.t.secStart - 4 * b.bl), b.t.secStart), qA = quietRatio(a.t, za0, za1);
+  const za0 = a.t.secStart + Math.max(0, a.bars - 8) * a.bl, za1 = a.t.secStart + a.bars * a.bl;
+  const vA = vocalIn(a.t, za0, za1), vB = vocalIn(b.t, Math.max(0, b.t.secStart - 8 * b.bl), b.t.secStart), qA = quietRatio(a.t, za0, za1);
   const clashAB = vA > 0.35 && vB > 0.35;
   if (clashAB) { w.loopin *= 0.4; w.cut *= 4; w.backspin *= 3; w.blend *= 0.1; w.beatdrop *= 0.2; w.bassswap *= 0.3; w.phaser *= 0.3; w.filter *= 0.3; w.loop *= 0.4; w.echo *= 0.6; why.unshift('both songs have vocals here, so it never stacks them'); }
   else if (qA < 0.45) { w.cut *= 2.5; w.beatdrop *= 2.2; w.blend *= 0.5; why.unshift('the old song goes quiet here, the perfect moment for the new beat or vocals to drop'); }
@@ -894,9 +897,9 @@ function aiPick(a, b, i, prev) {
   if (a.t.stems && b.t.stems && stemsFresh(a.t) && stemsFresh(b.t)) { w.stemswap = clashAB ? 6 : 4; why.push('both songs have AI stems, so it blends them part by part'); }
   const keys = Object.keys(w), tot = keys.reduce((s, k) => s + w[k], 0); let x = R() * tot, style = keys[0];
   for (const k of keys) { x -= w[k]; if (x <= 0) { style = k; break; } }
-  const lens = { stemswap: [4, 8], loopin: [2, 4], cut: [1], backspin: [1, 2], echo: [1, 2], loop: [2, 4], bassswap: [2, 4], beatdrop: [4, 8], blend: [8, 16], filter: [4, 8], phaser: [4, 8] }[style];
+  const lens = { stemswap: [8], loopin: [4, 8], cut: [1], backspin: [1, 2], echo: [2, 4], loop: [4, 8], bassswap: [8], beatdrop: [8], blend: [8], filter: [8], phaser: [8] }[style];
   const loops = [0.5, 1, 'roll', 'roll', 0.25];
-  return { style, bars: clashAB ? lens[0] : lens[Math.floor(R() * lens.length)], loop: style === 'loop' || style === 'loopin' ? loops[Math.floor(R() * loops.length)] : null, why: why.length ? why.join(', ') : 'it fits the flow of the set' };
+  return { style, bars: clashAB ? lens[0] : lens.includes(8) ? 8 : lens[Math.floor(R() * lens.length)], loop: style === 'loop' || style === 'loopin' ? loops[Math.floor(R() * loops.length)] : null, why: why.length ? why.join(', ') : 'it fits the flow of the set' };
 }
 
 /* ---------- automation envelopes ---------- */
@@ -951,6 +954,10 @@ function applyTransition(style, A, B, tau, T, beat) {
       A.hp.set(tau, 20).exp(end - q, 2500);
       A.low.set(swap - q, 0).lin(swap, KILL);
       fadeOut(A.fader, mid, end); break;
+    case 'echocut':
+      B.fader.set(tau, 0).set(end - 0.01, 0).lin(end + 0.01, 1);
+      A.send.set(end - beat, 0).lin(end - beat / 2, 0.85).set(end - 0.005, 0.85).lin(end + 0.02, 0);
+      A.fader.set(end - 0.03, 1).lin(end, 0); break;
     case 'echo':
       fadeIn(B.fader, tau, end - beat);
       B.low.set(tau, KILL).set(end - 0.01, KILL).lin(end + 0.02, 0);
@@ -1004,6 +1011,12 @@ function applyTransition(style, A, B, tau, T, beat) {
   }
 }
 
+function safeStart(node, when, offset, dur, rate) {
+  // never ask Web Audio for a negative offset: start a little later instead
+  if (offset < 0) { const lag = -offset / (rate || 1); when += lag; if (dur != null) dur += offset; offset = 0; }
+  if (dur != null && dur <= 0) return;
+  if (dur != null) node.start(Math.max(0, when), offset, dur); else node.start(Math.max(0, when), offset);
+}
 async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
   const sr = 44100, len = Math.max(1, Math.ceil((w1 - w0) * sr)), W0 = w0, W1 = w1;
   const { items, beat, mb } = plan;
@@ -1075,7 +1088,7 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
           const le = ls + lb * beat * rr; if (le - ls < 0.005 || le > sl.buf.duration) continue;
           const s0 = Math.max(p0, w0), s1 = Math.min(p1, w1); if (s1 <= s0) continue;
           const lsrc = oc.createBufferSource(); lsrc.buffer = sl.buf; lsrc.playbackRate.value = rr; lsrc.loop = true; lsrc.loopStart = ls; lsrc.loopEnd = le;
-          lsrc.connect(trim); lsrc.start(s0 - w0, ls + ((s0 - p0) * rr) % (le - ls)); lsrc.stop(s1 - w0);
+          lsrc.connect(trim); lsrc.start(Math.max(0, s0 - w0), Math.max(0, ls + ((s0 - p0) * rr) % (le - ls))); lsrc.stop(Math.max(0, s1 - w0));
         }
       }
       let cut = b;
@@ -1087,7 +1100,7 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
           const le = Math.min(off(tau), ls + lb * beat * rr); if (le - ls < 0.005) continue;
           const s0 = Math.max(p0, w0), s1 = Math.min(p1, w1); if (s1 <= s0) continue;
           const lsrc = oc.createBufferSource(); lsrc.buffer = sl.buf; lsrc.playbackRate.value = rr; lsrc.loop = true; lsrc.loopStart = ls; lsrc.loopEnd = le;
-          lsrc.connect(trim); lsrc.start(s0 - w0, ls + ((s0 - p0) * rr) % (le - ls)); lsrc.stop(s1 - w0);
+          lsrc.connect(trim); lsrc.start(Math.max(0, s0 - w0), Math.max(0, ls + ((s0 - p0) * rr) % (le - ls))); lsrc.stop(Math.max(0, s1 - w0));
         }
       }
       if (nxt && it.outBars && it.outStyle === 'backspin') {
@@ -1101,7 +1114,7 @@ async function renderRange(plan, w0, w1, slices, onProg, isCancelled) {
         }
       }
       const to2 = Math.min(to, cut);
-      if (to2 > from2) { if (stemSrcs.length) stemSrcs.forEach(ss => ss.start(from2 - w0, off(from2), (to2 - from2) * rr)); else src.start(from2 - w0, off(from2), (to2 - from2) * rr); }
+      if (to2 > from2) { if (stemSrcs.length) stemSrcs.forEach(ss => safeStart(ss, from2 - w0, off(from2), (to2 - from2) * rr, rr)); else safeStart(src, from2 - w0, off(from2), (to2 - from2) * rr, rr); }
       return oc.startRendering();
     } });
   });
@@ -1311,7 +1324,7 @@ async function getSlice(it) {
   for (let i = 0; i < n; i += 16) { s += (L[i] * L[i] + R[i] * R[i]) / 2; cnt++; }
   const rms = Math.sqrt(s / Math.max(1, cnt));
   const val = { buf: out, trim: rms > 1e-4 ? clamp(0.16 / rms, 0.3, 3) : 1, pre, phase: 0, k: 1 };
-  { const bt = 60 / effBpm(t), rp = refinePhase(out, pre + ((t.downbeat - it.s) % bt + bt) % bt, bt); val.phase = rp.ph; val.k = rp.k; }
+  { const bt = 60 / effBpm(t), rp = refinePhase(out, pre + ((t.downbeat - it.s) % bt + bt) % bt, bt); val.phase = Math.max(rp.ph, -pre); val.k = rp.k; }
   if (t.stems && stemsCover(it)) { val.stems = stemSlices(t, i0, n, out); if (t.vocalOnly) for (let ch = 0; ch < 2; ch++) out.getChannelData(ch).set(val.stems.vocals.getChannelData(ch)); }
   if (t.vocalOnly && !val.stems) { setStatus('Isolating the vocals of ' + t.name + '…'); await isolateVocals(out); setStatus(''); }
   sliceCache.set(ck, val);
@@ -1338,6 +1351,7 @@ function startPlay(kind, buf, off, dur, r, onTick, base, quickEnd) {
   stopPlay();
   const c = ac(); c.resume();
   const s = c.createBufferSource(); s.buffer = buf; s.playbackRate.value = r; s.connect(meterNode());
+  off = Math.max(0, off || 0);
   if (dur != null) s.start(0, off, dur); else s.start(0, off);
   Object.assign(P, { src: s, kind, t0: c.currentTime, off, rate: r, base: base || 0, quickEnd: quickEnd == null ? null : quickEnd, tScale: 1, bufMaster: kind === 'mix' ? S.master : 0 });
   s.onended = () => { if (P.src === s) { if (kind === 'mix') { const qe = P.quickEnd != null ? P.quickEnd * (P.tScale || 1) : null; if (qe != null && S.busy) { S.pendingPlay = qe; setBusy('Still mixing the rest', S.busyFrac); } S.mixPos = qe != null ? qe : 0; P.kind = null; P.src = null; refreshPlayUI('mix'); } else stopPlay(); } };
@@ -1790,7 +1804,7 @@ function scheduleAutoBuild() {
   clearTimeout(autoT);
   autoT = setTimeout(() => {
     if (S.busy || P.kind === 'mix' || S.tracks.some(t => t.status === 'analyzing')) { if (!S.busy) scheduleAutoBuild(); return; }
-    if ((!S.mix || S.mixDirty) && S.tracks.some(ready)) buildMix({ background: true });
+    if ((!S.mix || S.mixDirty) && S.tracks.some(ready) && S.failVer !== S.ver) buildMix({ background: true });
   }, 1500);
 }
 function setBusy(msg, frac) { S.busyMsg = msg; S.busyFrac = frac == null ? null : clamp(frac, 0, 1); updateProgress(); }
@@ -2018,6 +2032,7 @@ async function aiBuildMix() {
   $('#aiUndo').hidden = false;
   setTab('mix');
   notifyDone('Your AI mix is ready: ' + fmt(tot) + '.');
+  if (S.aiFx) await addVocalTeasers({ quiet: true });
   setDesignStatus('Built a ' + fmt(tot) + ' mix from ' + use.length + (use.length === 1 ? ' song' : ' songs') +
     (nRep ? ', with ' + nRep + (nRep === 1 ? ' reprise' : ' reprises') + ' of the strongest vocal hooks' : '') +
     (use.length < origins.length ? '. ' + (origins.length - use.length) + ' left out to fit the length' : '') +
@@ -2127,7 +2142,7 @@ async function buildMix(opts) {
     const stale = () => opts.background && (S.ver || 0) !== ver;
     for (let i = 0; i < plan.items.length; i++) { if (stale()) break; setBusy((opts.background ? 'Updating the mix: ' : 'Building the mix: ') + 'preparing track ' + (i + 1) + ' of ' + plan.items.length, 0.35 * i / plan.items.length); slices[i] = await getSlice(plan.items[i]); await sleep(0); }
     setBusy(opts.background ? 'Updating the mix' : 'Mixing', 0.35); await sleep(20);
-    const buf = stale() ? null : await renderRange(plan, 0, plan.total, slices, f => setBusy(opts.background ? 'Updating the mix' : 'Mixing', 0.35 + 0.6 * f), stale);
+    let buf = stale() ? null : await renderRange(plan, 0, plan.total, slices, f => setBusy(opts.background ? 'Updating the mix' : 'Mixing', 0.35 + 0.6 * f), stale);
     if (!buf) { S.busy = false; clearBusy(); scheduleAutoBuild(); return; }
     setBusy('Finishing', 0.97); await sleep(0); normalize(buf); const raw = buf;
     if (S.enhance !== 'off') { setBusy('Mastering: ' + MASTER[S.enhance].name, 0.98); buf = await masterBuffer(raw, S.enhance); }
@@ -2138,9 +2153,10 @@ async function buildMix(opts) {
     notifyDone('Your ' + fmt(plan.total) + ' mix is ready.');
     const dl = await getDownloads(); $('#download').hidden = !dl;
     if (!dl) setStatus('');
-  } catch (e) { console.error(e); S.pendingPlay = null; setStatus('The mix could not be built: ' + (e && e.message ? e.message : e)); }
+    S.failVer = null;
+  } catch (e) { console.error(e); S.pendingPlay = null; S.failVer = S.ver; setStatus('The mix could not be built: ' + (e && e.message ? e.message : e)); }
   S.busy = false; clearBusy(); renderList();
-  if (S.mixDirty) scheduleAutoBuild();
+  if (S.mixDirty && S.failVer !== S.ver) scheduleAutoBuild();
   if (P.kind === 'mix' && (P.quickEnd != null || S.liveSwitch) && S.mix && !S.mixDirty) { S.liveSwitch = false; const cp = pos(); startPlay('mix', S.mix.buf, clamp(cp, 0, S.mix.plan.total - 0.05), null, 1, mixTick); }
   if (S.pendingPlay != null) { const p = S.pendingPlay; S.pendingPlay = null; if (S.mix && !S.mixDirty) startPlay('mix', S.mix.buf, clamp(p, 0, S.mix.plan.total - 0.05), null, 1, mixTick); else playMixFrom(p); }
 }
@@ -3363,6 +3379,41 @@ function stemSlices(t, i0, n, mix) {
 
 $('#stemsAll').addEventListener('click', separateAllStems);
 setTimeout(() => { if (!stemsSupported()) $('#stemsAll').hidden = true; }, 0);
+/* ---------- vocal teasers: short acapella hooks of the next song over the end of the current one ---------- */
+async function addVocalTeasers(opts) {
+  opts = opts || {};
+  const rd = S.tracks.filter(ready); if (rd.length < 2) { if (!opts.quiet) setStatus('Add at least two songs first.'); return 0; }
+  if (!opts.quiet) setBusy('Finding vocal hooks', null);
+  await ensureDeepAll(rd);
+  S.fx = S.fx.filter(c => !c.auto);
+  const plan = computePlan(), its = plan.items, mb = plan.mb, R = rng(((S.ver || 1) * 7919 + its.length * 31) >>> 0);
+  let added = 0;
+  for (let i = 0; i < its.length - 1; i++) {
+    const A = its[i], B = its[i + 1], bt = B.t, bl = barLen(bt);
+    if (R() < 0.3 && !opts.all) continue;                       // not on every transition: keep it a surprise
+    // the strongest one-bar vocal hook in the next song's section
+    let best = 0, hook = -1;
+    for (let k = 0; k < clampBars(bt); k++) { const s0 = bt.secStart + k * bl, v = vocalIn(bt, s0, s0 + bl); if (v > best) { best = v; hook = s0; } }
+    if (hook < 0 || best < 0.5) continue;
+    // a two-bar spot before the transition where the current song has no vocals
+    let at = -1;
+    for (const back of [4, 8, 12, 16]) {
+      const t0 = A.tauOut - back * mb, t1 = t0 + 2 * mb;
+      if (t0 < A.leadEnd + mb || t1 > A.tauOut) continue;
+      const s0 = A.s + (t0 - A.start) * A.r, s1 = A.s + (t1 - A.start) * A.r;
+      if (vocalIn(A.t, s0, s1) < 0.25) { at = t0; break; }
+    }
+    if (at < 0) continue;
+    const g0 = plan.grid0 || 0; at = g0 + Math.round((at - g0) / mb) * mb;
+    S.fx.push({ id: 'fx' + (++uid), kind: 'snippet', auto: true, at, trackId: (bt.origin || bt).id, start: hook, beats: 4, repeat: 2, vocal: true, gainDb: -2 });
+    added++;
+  }
+  if (!opts.quiet) clearBusy();
+  markDirty(); renderList();
+  if (!opts.quiet) setStatus(added ? 'Added ' + added + ' vocal ' + (added === 1 ? 'teaser' : 'teasers') + ': a short hook of the next song over an instrumental part before each chosen transition. They are in the FX lane.' : 'No good spots found: the songs need clear vocal hooks and instrumental parts before the transitions.');
+  return added;
+}
+$('#teasers').addEventListener('click', () => addVocalTeasers());
 function setTab(name) {
   S.tab = name;
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
